@@ -51,7 +51,13 @@ const calculateGains = (points) => {
 // ✅ IMPROVED: Helper to safely emit socket events with user-specific rooms
 const emitSocketEvent = (req, eventName, data, userId = null) => {
   try {
-    if (req.io && typeof req.io.emit === 'function') {
+    // ✅ Check if req.io exists
+    if (!req.io) {
+      console.log(`⚠️ Socket.io not available for event: ${eventName}`);
+      return false;
+    }
+    
+    if (typeof req.io.emit === 'function') {
       // Emit to all clients
       req.io.emit(eventName, data);
       
@@ -65,7 +71,7 @@ const emitSocketEvent = (req, eventName, data, userId = null) => {
       
       return true;
     } else {
-      console.log(`⚠️ Socket.io not available, skipping event: ${eventName}`);
+      console.log(`⚠️ req.io.emit is not a function for event: ${eventName}`);
       return false;
     }
   } catch (error) {
@@ -73,7 +79,6 @@ const emitSocketEvent = (req, eventName, data, userId = null) => {
     return false;
   }
 };
-
 // -----------------------------
 // 🧾 Get all pickups (Admin only)
 // -----------------------------
@@ -119,11 +124,12 @@ router.post("/", authMiddleware, async (req, res) => {
     
     const { items, address, pickupTime, time_slot, weight, instructions } = req.body;
 
+    // Validation
     if (!address || !items || !weight || !pickupTime || !time_slot) {
       console.log("❌ Validation failed - missing fields");
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: address, items, weight, pickupTime, and time_slot",
+        message: "Missing required fields",
       });
     }
 
@@ -135,14 +141,10 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
-    console.log("✅ Validation passed");
-
     const { processedItems, totalPoints } = calculatePointsAndDistributeWeight(items, weight);
-    console.log("📊 Calculated points:", totalPoints);
-    
     const totalGains = calculateGains(totalPoints);
-    console.log("💰 Calculated gains:", totalGains);
 
+    // Create pickup
     const pickup = await Pickup.create({
       userId: req.userId,
       address,
@@ -156,36 +158,42 @@ router.post("/", authMiddleware, async (req, res) => {
       status: "pending",
     });
 
-    // Populate pickup details for socket emission
+    // Populate pickup details
     await pickup.populate("userId", "name email");
 
     console.log("✅ Pickup created:", pickup._id);
 
-    // ✅ Add activity to user immediately
-    await userModel.findByIdAndUpdate(req.userId, {
-      $push: {
-        activity: {
-          action: `Created pickup request - ${totalPoints} points pending`,
-          points: 0, // Points not awarded yet
-          gains: 0,
-          date: new Date(),
+    // ✅ Try to add activity, but don't fail if it errors
+    try {
+      await userModel.findByIdAndUpdate(req.userId, {
+        $push: {
+          activity: {
+            action: `Created pickup request - ${totalPoints} points pending`,
+            points: 0,
+            gains: 0,
+            date: new Date(),
+          },
         },
-      },
-    });
+      });
+      console.log("✅ Activity added to user");
+    } catch (activityError) {
+      console.error("⚠️ Failed to add activity (non-critical):", activityError.message);
+      // Don't throw - pickup was created successfully
+    }
 
-    // Emit socket event to user and admins
+    // ✅ Try to emit socket event, but don't fail if it errors
     emitSocketEvent(req, "new-pickup", {
       pickup,
       userId: req.userId,
       timestamp: new Date()
     });
     
-    // Also emit specifically to user
     emitSocketEvent(req, "pickup-created", {
       pickup,
       message: "Your pickup request was created successfully"
     }, req.userId);
 
+    // ✅ Return success even if socket emit failed
     res.status(201).json({ 
       success: true, 
       pickup,
@@ -193,8 +201,10 @@ router.post("/", authMiddleware, async (req, res) => {
       gains: totalGains,
       message: "Pickup request created successfully"
     });
+    
   } catch (error) {
     console.error("❌ Error creating pickup:", error);
+    console.error("Error stack:", error.stack);
     res.status(500).json({ 
       success: false, 
       message: "Failed to create pickup",
