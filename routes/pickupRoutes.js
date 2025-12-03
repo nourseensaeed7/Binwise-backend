@@ -9,33 +9,22 @@ const router = express.Router();
 // 🎯 POINTS CALCULATION HELPER FUNCTION
 const calculatePointsAndDistributeWeight = (items, totalWeight) => {
   const POINTS_PER_KG = {
-    Plastic: 167,
-    plastic: 167,
-    Paper: 53,
-    paper: 53,
-    Metal: 287,
-    metal: 287,
-    Glass: 23,
-    glass: 23,
-    "E-Waste": 20,
-    "e-waste": 20,
-    electronics: 2000,
-    Electronics: 2000,
-    cardboard: 53,
-    Cardboard: 53,
-    clothes: 117,
-    Clothes: 117,
-    wood: 100,
-    Wood: 100,
+    Plastic: 167, plastic: 167,
+    Paper: 53, paper: 53,
+    Metal: 287, metal: 287,
+    Glass: 23, glass: 23,
+    "E-Waste": 20, "e-waste": 20,
+    electronics: 2000, Electronics: 2000,
+    cardboard: 53, Cardboard: 53,
+    clothes: 117, Clothes: 117,
+    wood: 100, Wood: 100,
   };
   
-  // Check if items already have weights
   const totalItemWeight = items.reduce((sum, item) => sum + (item.weight || 0), 0);
   const hasItemWeights = totalItemWeight > 0;
   
   let processedItems = [...items];
   
-  // If items don't have individual weights, distribute total weight evenly
   if (!hasItemWeights && totalWeight > 0) {
     const weightPerItem = totalWeight / items.length;
     processedItems = items.map(item => ({
@@ -44,7 +33,6 @@ const calculatePointsAndDistributeWeight = (items, totalWeight) => {
     }));
   }
   
-  // Calculate total points
   const totalPoints = processedItems.reduce((acc, item) => {
     const perKg = POINTS_PER_KG[item.type] || 0;
     return acc + perKg * (item.weight || 0);
@@ -52,26 +40,37 @@ const calculatePointsAndDistributeWeight = (items, totalWeight) => {
   
   return {
     processedItems,
-    totalPoints: Math.round(totalPoints) // Round to nearest integer
+    totalPoints: Math.round(totalPoints)
   };
 };
 
-// GAINS CALCULATION: 1 point = 0.15 EGP
 const calculateGains = (points) => {
   return parseFloat((points * 0.15).toFixed(2));
 };
 
-// Helper to safely emit socket events
-const emitSocketEvent = (req, eventName, data) => {
+// ✅ IMPROVED: Helper to safely emit socket events with user-specific rooms
+const emitSocketEvent = (req, eventName, data, userId = null) => {
   try {
     if (req.io && typeof req.io.emit === 'function') {
+      // Emit to all clients
       req.io.emit(eventName, data);
-      console.log(`📡 Socket event emitted: ${eventName}`);
+      
+      // Also emit to specific user room if userId provided
+      if (userId) {
+        req.io.to(`user:${userId}`).emit(eventName, data);
+        console.log(`📡 Socket event emitted to user ${userId}: ${eventName}`);
+      } else {
+        console.log(`📡 Socket event emitted globally: ${eventName}`);
+      }
+      
+      return true;
     } else {
       console.log(`⚠️ Socket.io not available, skipping event: ${eventName}`);
+      return false;
     }
   } catch (error) {
     console.error(`❌ Error emitting socket event ${eventName}:`, error.message);
+    return false;
   }
 };
 
@@ -82,7 +81,8 @@ router.get("/", authMiddleware, roleAuth("admin"), async (req, res) => {
   try {
     const pickups = await Pickup.find()
       .populate("userId", "name email")
-      .populate("deliveryAgentId", "name email");
+      .populate("deliveryAgentId", "name email")
+      .sort({ createdAt: -1 });
     res.json({ success: true, pickups });
   } catch (error) {
     console.error("❌ Error fetching pickups:", error.message);
@@ -116,11 +116,9 @@ router.post("/", authMiddleware, async (req, res) => {
   try {
     console.log("📥 Creating pickup request...");
     console.log("User ID:", req.userId);
-    console.log("Request body:", JSON.stringify(req.body, null, 2));
     
     const { items, address, pickupTime, time_slot, weight, instructions } = req.body;
 
-    // Validation
     if (!address || !items || !weight || !pickupTime || !time_slot) {
       console.log("❌ Validation failed - missing fields");
       return res.status(400).json({
@@ -129,7 +127,6 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
-    // Validate items is an array
     if (!Array.isArray(items) || items.length === 0) {
       console.log("❌ Validation failed - invalid items");
       return res.status(400).json({
@@ -140,15 +137,12 @@ router.post("/", authMiddleware, async (req, res) => {
 
     console.log("✅ Validation passed");
 
-    // CALCULATE POINTS AND DISTRIBUTE WEIGHT AUTOMATICALLY
     const { processedItems, totalPoints } = calculatePointsAndDistributeWeight(items, weight);
     console.log("📊 Calculated points:", totalPoints);
     
-    // CALCULATE GAINS (1 point = 0.15 EGP)
     const totalGains = calculateGains(totalPoints);
     console.log("💰 Calculated gains:", totalGains);
 
-    // Create pickup
     const pickup = await Pickup.create({
       userId: req.userId,
       address,
@@ -162,10 +156,35 @@ router.post("/", authMiddleware, async (req, res) => {
       status: "pending",
     });
 
+    // Populate pickup details for socket emission
+    await pickup.populate("userId", "name email");
+
     console.log("✅ Pickup created:", pickup._id);
 
-    // Emit socket event safely
-    emitSocketEvent(req, "new-pickup", pickup);
+    // ✅ Add activity to user immediately
+    await userModel.findByIdAndUpdate(req.userId, {
+      $push: {
+        activity: {
+          action: `Created pickup request - ${totalPoints} points pending`,
+          points: 0, // Points not awarded yet
+          gains: 0,
+          date: new Date(),
+        },
+      },
+    });
+
+    // Emit socket event to user and admins
+    emitSocketEvent(req, "new-pickup", {
+      pickup,
+      userId: req.userId,
+      timestamp: new Date()
+    });
+    
+    // Also emit specifically to user
+    emitSocketEvent(req, "pickup-created", {
+      pickup,
+      message: "Your pickup request was created successfully"
+    }, req.userId);
 
     res.status(201).json({ 
       success: true, 
@@ -176,12 +195,106 @@ router.post("/", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error creating pickup:", error);
-    console.error("Error stack:", error.stack);
     res.status(500).json({ 
       success: false, 
       message: "Failed to create pickup",
       error: error.message 
     });
+  }
+});
+
+// -----------------------------
+// ✅ Complete pickup (admin or assigned agent)
+// -----------------------------
+router.put("/:id/complete", authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log("✅ Completing pickup:", id);
+    
+    const pickup = await Pickup.findById(id);
+    if (!pickup) {
+      console.log("❌ Pickup not found");
+      return res.status(404).json({ success: false, message: "Pickup not found" });
+    }
+
+    if (req.userRole !== "admin" && pickup.deliveryAgentId?.toString() !== req.userId) {
+      console.log("❌ Not authorized");
+      return res.status(403).json({ success: false, message: "Not authorized" });
+    }
+
+    if (pickup.status === "completed") {
+      console.log("❌ Already completed");
+      return res.status(400).json({ success: false, message: "Already completed" });
+    }
+
+    const { totalPoints } = calculatePointsAndDistributeWeight(pickup.items, pickup.weight);
+    const totalGains = calculateGains(totalPoints);
+    
+    pickup.awardedPoints = totalPoints;
+    pickup.gains = totalGains;
+    pickup.status = "completed";
+    await pickup.save();
+
+    console.log("💰 Awarding points:", totalPoints, "and gains:", totalGains);
+
+    // ✅ Update user points, gains, and activity
+    const updatedUser = await userModel.findByIdAndUpdate(
+      pickup.userId,
+      {
+        $inc: { 
+          points: totalPoints,
+          gains: totalGains,
+          daysRecycled: 1
+        },
+        $push: {
+          activity: {
+            action: `Pickup completed - Earned ${totalPoints} points (${totalGains} EGP)`,
+            points: totalPoints,
+            gains: totalGains,
+            date: new Date(),
+          },
+        },
+      },
+      { new: true }
+    ).select("points gains activity");
+
+    console.log("✅ Pickup completed and user updated");
+
+    // Populate for socket emission
+    await pickup.populate("userId", "name email");
+    await pickup.populate("deliveryAgentId", "name email");
+
+    // Emit to all clients
+    emitSocketEvent(req, "pickup-completed", {
+      pickup,
+      userId: pickup.userId._id,
+      timestamp: new Date()
+    });
+    
+    // Emit specifically to the user
+    emitSocketEvent(req, "points-awarded", {
+      points: totalPoints,
+      gains: totalGains,
+      totalPoints: updatedUser.points,
+      totalGains: updatedUser.gains,
+      message: `Congratulations! You earned ${totalPoints} points (${totalGains} EGP)`
+    }, pickup.userId._id.toString());
+
+    res.json({ 
+      success: true, 
+      pickup, 
+      awardedPoints: totalPoints,
+      gains: totalGains,
+      user: {
+        points: updatedUser.points,
+        gains: updatedUser.gains,
+        latestActivity: updatedUser.activity[updatedUser.activity.length - 1]
+      },
+      message: "Pickup completed successfully"
+    });
+  } catch (error) {
+    console.error("❌ Error completing pickup:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -195,26 +308,36 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     
     const pickup = await Pickup.findById(id);
     if (!pickup) {
-      console.log("❌ Pickup not found");
       return res.status(404).json({ success: false, message: "Pickup not found" });
     }
 
-    // Check authorization
     if (req.userRole !== "admin" && pickup.userId.toString() !== req.userId) {
-      console.log("❌ Not authorized");
       return res.status(403).json({ success: false, message: "Not authorized" });
     }
 
     if (pickup.status === "completed") {
-      console.log("❌ Cannot delete completed pickup");
       return res.status(400).json({ success: false, message: "Cannot delete completed pickups" });
     }
 
     await Pickup.findByIdAndDelete(id);
-    console.log("✅ Pickup deleted");
 
-    // Emit socket event safely
-    emitSocketEvent(req, "delete-pickup", id);
+    // Add activity log
+    await userModel.findByIdAndUpdate(pickup.userId, {
+      $push: {
+        activity: {
+          action: "Pickup request cancelled",
+          points: 0,
+          gains: 0,
+          date: new Date(),
+        },
+      },
+    });
+
+    emitSocketEvent(req, "pickup-deleted", { 
+      pickupId: id,
+      userId: pickup.userId,
+      timestamp: new Date()
+    });
 
     res.json({ success: true, message: "Pickup deleted successfully" });
   } catch (error) {
@@ -229,34 +352,26 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("✏️ Updating pickup:", id);
-    
     const { address, items, weight, instructions, pickupTime, time_slot } = req.body;
 
     const pickup = await Pickup.findById(id);
     if (!pickup) {
-      console.log("❌ Pickup not found");
       return res.status(404).json({ success: false, message: "Pickup not found" });
     }
 
-    // Check authorization
     if (req.userRole !== "admin" && pickup.userId.toString() !== req.userId) {
-      console.log("❌ Not authorized");
       return res.status(403).json({ success: false, message: "Not authorized" });
     }
 
     if (pickup.status !== "pending") {
-      console.log("❌ Can only update pending pickups");
       return res.status(400).json({ success: false, message: "Only pending pickups can be updated" });
     }
 
-    // Update basic fields
     if (address) pickup.address = address;
     if (instructions !== undefined) pickup.instructions = instructions;
     if (pickupTime) pickup.pickupTime = new Date(pickupTime);
     if (time_slot) pickup.time_slot = time_slot;
 
-    // ✅ RECALCULATE POINTS AND GAINS if items or weight changed
     if (items || weight) {
       const updatedItems = items || pickup.items;
       const updatedWeight = weight || pickup.weight;
@@ -272,15 +387,15 @@ router.put("/:id", authMiddleware, async (req, res) => {
       pickup.weight = updatedWeight;
       pickup.awardedPoints = totalPoints;
       pickup.gains = totalGains;
-      
-      console.log("📊 Recalculated - Points:", totalPoints, "Gains:", totalGains);
     }
 
     await pickup.save();
-    console.log("✅ Pickup updated");
 
-    // Emit socket event safely
-    emitSocketEvent(req, "update-pickup", pickup);
+    emitSocketEvent(req, "pickup-updated", {
+      pickup,
+      userId: pickup.userId,
+      timestamp: new Date()
+    });
 
     res.json({ 
       success: true, 
@@ -302,12 +417,9 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
   try {
     const { id } = req.params;
     const { deliveryAgentId, pickupTime } = req.body;
-    
-    console.log("🚚 Assigning pickup:", id, "to agent:", deliveryAgentId);
 
     const pickup = await Pickup.findById(id);
     if (!pickup) {
-      console.log("❌ Pickup not found");
       return res.status(404).json({ success: false, message: "Pickup not found" });
     }
 
@@ -316,84 +428,18 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
     pickup.status = "assigned";
     await pickup.save();
 
-    console.log("✅ Pickup assigned");
+    await pickup.populate("deliveryAgentId", "name email");
 
-    // Emit socket event safely
-    emitSocketEvent(req, "update-pickup", pickup);
+    emitSocketEvent(req, "pickup-assigned", {
+      pickup,
+      userId: pickup.userId,
+      agentId: deliveryAgentId,
+      timestamp: new Date()
+    });
 
     res.json({ success: true, pickup });
   } catch (error) {
     console.error("❌ Error assigning pickup:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// -----------------------------
-// ✅ Complete pickup (admin or assigned agent)
-// -----------------------------
-router.put("/:id/complete", authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log("✅ Completing pickup:", id);
-    
-    const pickup = await Pickup.findById(id);
-    if (!pickup) {
-      console.log("❌ Pickup not found");
-      return res.status(404).json({ success: false, message: "Pickup not found" });
-    }
-
-    // Check authorization
-    if (req.userRole !== "admin" && pickup.deliveryAgentId?.toString() !== req.userId) {
-      console.log("❌ Not authorized");
-      return res.status(403).json({ success: false, message: "Not authorized" });
-    }
-
-    if (pickup.status === "completed") {
-      console.log("❌ Already completed");
-      return res.status(400).json({ success: false, message: "Already completed" });
-    }
-
-    // ✅ Recalculate points and gains one final time
-    const { totalPoints } = calculatePointsAndDistributeWeight(pickup.items, pickup.weight);
-    const totalGains = calculateGains(totalPoints);
-    
-    pickup.awardedPoints = totalPoints;
-    pickup.gains = totalGains;
-    pickup.status = "completed";
-    await pickup.save();
-
-    console.log("💰 Awarding points:", totalPoints, "and gains:", totalGains);
-
-    // ✅ Update user points and gains
-    await userModel.findByIdAndUpdate(pickup.userId, {
-      $inc: { 
-        points: totalPoints,
-        gains: totalGains
-      },
-      $push: {
-        activity: {
-          action: `Completed pickup worth ${totalPoints} points (${totalGains} EGP)`,
-          points: totalPoints,
-          gains: totalGains,
-          date: new Date(),
-        },
-      },
-    });
-
-    console.log("✅ Pickup completed and user updated");
-
-    // Emit socket event safely
-    emitSocketEvent(req, "update-pickup", pickup);
-
-    res.json({ 
-      success: true, 
-      pickup, 
-      awardedPoints: totalPoints,
-      gains: totalGains,
-      message: "Pickup completed successfully"
-    });
-  } catch (error) {
-    console.error("❌ Error completing pickup:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

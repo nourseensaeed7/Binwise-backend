@@ -318,65 +318,86 @@ export const resetPassword = async (req, res) => {
 ===================================================== */
 export const isAuthenticated = async (req, res) => {
   try {
-    const user = await userModel.findById(req.userId).select("-password");
-    if (!user)
-      return res.status(404).json({ success: false, message: "User not found" });
+    const user = await User.findById(req.userId).select("-password");
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
+    }
 
-    return res.json({
+    res.json({
       success: true,
       userData: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
-        level: user.level,
-        badges: user.badges,
         isAccountVerified: user.isAccountVerified,
+        points: user.points || 0,
+        gains: user.gains || 0,
+        activity: user.activity || [], // ✅ Include here too
       },
     });
   } catch (error) {
-    console.error("Auth check error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Server error, please try again" });
+    console.error("Error in isAuthenticated:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
+// controllers/authController.js
+
+// ... (keep all your existing imports and functions)
+
 /* =====================================================
-   GET USER PROFILE
+   GET USER PROFILE - Fixed to include activities
 ===================================================== */
 export const getUserProfile = async (req, res) => {
   try {
-    const user = await userModel.findById(req.userId).select("-password");
+    console.log("📋 Fetching profile for user:", req.userId);
+    
+    const user = await User.findById(req.userId).select("-password");
+    
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      console.log("❌ User not found");
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
     }
+
+    console.log("✅ Profile found:", user.name);
+    console.log("📊 Activities count:", user.activity?.length || 0);
 
     return res.json({
       success: true,
-      userData: {
+      user: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
-        level: user.level,
-        points: user.points,
-        daysRecycled: user.daysRecycled,
-        badges: user.badges,
-        stats: user.stats,
-        activity: user.activity,
-        isAccountVerified: user.isAccountVerified,
+        phone: user.phone,
         address: user.address,
         profileImage: user.profileImage,
+        points: user.points || 0,
+        gains: user.gains || 0,
+        level: user.level || 1,
+        daysRecycled: user.daysRecycled || 0,
+        badges: user.badges || [],
+        stats: user.stats || {},
+        activity: user.activity || [], // ✅ CRITICAL: Include activities
+        isAccountVerified: user.isAccountVerified,
+        createdAt: user.createdAt,
       },
     });
   } catch (error) {
-    console.error("Get profile error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch profile data" });
+    console.error("❌ Error fetching profile:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Server error",
+      error: error.message 
+    });
   }
 };
 
@@ -385,51 +406,63 @@ export const getUserProfile = async (req, res) => {
 ===================================================== */
 export const updateProfile = async (req, res) => {
   try {
-    const { name, email, address, level } = req.body;
-    const profileImage = req.file;
+    const { name, phone, address } = req.body;
+    const userId = req.userId;
 
-    console.log("Address:", address);
-    console.log("File uploaded:", req.file ? req.file.filename : "No file");
+    console.log("✏️ Updating profile for user:", userId);
 
-    const user = await userModel.findById(req.userId);
-    if (!user)
-      return res.status(404).json({ success: false, message: "User not found" });
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (phone) updateData.phone = phone;
+    if (address) updateData.address = address;
 
-    if (name) user.name = name;
-    if (email) user.email = email.toLowerCase();
-    if (address) user.address = address;
-    if (level) user.level = level;
-    if (profileImage) user.profileImage = `/uploads/${profileImage.filename}`;
-    if(req.file) user.profileImage = `/uploads/${req.file.filename}`;
+    // Handle profile image upload
+    if (req.file) {
+      const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+      updateData.profileImage = imageUrl;
+      console.log("📸 New profile image:", imageUrl);
+    }
 
-    await user.save();
+    const user = await User.findByIdAndUpdate(
+      userId,
+      updateData,
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
+    }
+
+    console.log("✅ Profile updated successfully");
 
     return res.json({
       success: true,
       message: "Profile updated successfully",
-      userData: {
+      user: {
         id: user._id,
         name: user.name,
         email: user.email,
+        role: user.role,
+        phone: user.phone,
         address: user.address,
         profileImage: user.profileImage,
-        level: user.level,
         points: user.points,
-        daysRecycled: user.daysRecycled,
-        badges: user.badges,
-        stats: user.stats,
-        activity: user.activity,
-        isAccountVerified: user.isAccountVerified,
+        gains: user.gains,
+        activity: user.activity || [],
       },
     });
   } catch (error) {
-    console.error("Update profile error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to update profile" });
+    console.error("❌ Error updating profile:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Server error",
+      error: error.message 
+    });
   }
 };
-
 /* =====================================================
    ADD RECYCLING ACTIVITY
 ===================================================== */

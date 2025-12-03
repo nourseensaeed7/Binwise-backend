@@ -44,7 +44,6 @@ app.use(
     origin: (origin, callback) => {
       console.log('🔍 Incoming request from origin:', origin);
       
-      // Allow requests with no origin (like mobile apps or Postman)
       if (!origin) return callback(null, true);
       
       if (allowedOrigins.includes(origin)) {
@@ -72,20 +71,72 @@ const io = new Server(server, {
     origin: allowedOrigins,
     credentials: true,
   },
+  // ✅ Add ping settings for better connection stability
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
-// Socket.IO connection handling
+// ✅ Track connected users
+const connectedUsers = new Map(); // userId -> socketId
+
+// Socket.IO connection handling with user rooms
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
 
+  // ✅ Handle user authentication and room joining
+  socket.on("authenticate", (userId) => {
+    if (userId) {
+      // Join user-specific room
+      socket.join(`user:${userId}`);
+      connectedUsers.set(userId, socket.id);
+      console.log(`👤 User ${userId} authenticated and joined room user:${userId}`);
+      
+      // Send confirmation
+      socket.emit("authenticated", { 
+        success: true, 
+        userId,
+        message: "Successfully connected to real-time updates"
+      });
+    }
+  });
+
+  // ✅ Handle manual room joining (alternative method)
+  socket.on("join-user-room", (userId) => {
+    if (userId) {
+      socket.join(`user:${userId}`);
+      console.log(`👤 User ${userId} joined room user:${userId}`);
+    }
+  });
+
+  // ✅ Handle disconnection
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
+    
+    // Remove from connected users
+    for (const [userId, socketId] of connectedUsers.entries()) {
+      if (socketId === socket.id) {
+        connectedUsers.delete(userId);
+        console.log(`👤 User ${userId} disconnected`);
+        break;
+      }
+    }
+  });
+
+  // ✅ Handle reconnection
+  socket.on("reconnect", (attemptNumber) => {
+    console.log(`🔄 Client reconnected after ${attemptNumber} attempts:`, socket.id);
+  });
+
+  // ✅ Handle ping/pong for connection health
+  socket.on("ping", () => {
+    socket.emit("pong", { timestamp: Date.now() });
   });
 });
 
 // CRITICAL: Make io available to ALL routes as middleware
 app.use((req, res, next) => {
   req.io = io;
+  req.connectedUsers = connectedUsers; // Also pass connected users map
   next();
 });
 
@@ -106,6 +157,7 @@ app.get("/", (req, res) => {
     message: "BinWise Backend API is running ✅",
     status: "healthy",
     socketIo: "enabled",
+    connectedClients: io.engine.clientsCount,
     timestamp: new Date().toISOString()
   });
 });
@@ -115,7 +167,18 @@ app.get("/health", (req, res) => {
   res.json({ 
     status: "ok",
     socketIo: typeof io !== 'undefined' ? "connected" : "disconnected",
+    connectedClients: io.engine.clientsCount,
     uptime: process.uptime()
+  });
+});
+
+// ✅ Socket status endpoint for debugging
+app.get("/api/socket-status", (req, res) => {
+  res.json({
+    success: true,
+    connectedClients: io.engine.clientsCount,
+    connectedUsers: Array.from(connectedUsers.keys()),
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -124,7 +187,7 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📡 Socket.io ready and available to routes`);
+  console.log(`📡 Socket.io ready with user room support`);
 });
 
 // Export io for use in other files if needed
