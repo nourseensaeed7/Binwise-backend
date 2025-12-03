@@ -28,13 +28,14 @@ app.use(express.json());
 app.use(cookieParser());
 
 // CORS - Add your Railway URL after deployment
+// CORS - Add your Railway URL after deployment
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
   "https://bin-wise-recycle.vercel.app",
-  "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",
+  "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",  // ✅ Add this
   "https://bin-wise-recycle-git-main-nourseens-projects.vercel.app",
   "https://backend-production-ec018.up.railway.app"
 ];
@@ -48,6 +49,7 @@ app.use(
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.log('❌ CORS blocked origin:', origin); // Add this for debugging
         callback(new Error("Not allowed by CORS"));
       }
     },
