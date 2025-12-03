@@ -9,10 +9,13 @@ const connectDB = async () => {
   }
 
   try {
+    // Check if MONGODB_URL exists
+    if (!process.env.MONGODB_URL) {
+      throw new Error("MONGODB_URL is not defined in environment variables");
+    }
+
     const conn = await mongoose.connect(process.env.MONGODB_URL, {
       dbName: "blogData",
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
     });
 
     isConnected = true;
