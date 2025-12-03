@@ -11,23 +11,18 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Routes
-import authRouter from "./routes/authRoutes.js";
-import postsRouter from "./routes/postsRoutes.js";
-import usersRouter from "./routes/userRoutes.js";
-import pickupRoutes from "./routes/pickupRoutes.js";
-import deliveryAgentRoutes from "./routes/deliveryAgentRoutes.js";
-import centersRoutes from "./routes/centersRoutes.js";
-import progressRoutes from "./routes/progressRoutes.js";
-
 dotenv.config();
+
+// Connect to MongoDB FIRST
+connectDB();
+
 const app = express();
 
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
 
-// CORS - Add your Railway URL after deployment
+// CORS
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -43,7 +38,6 @@ app.use(
   cors({
     origin: (origin, callback) => {
       console.log('🔍 Incoming request from origin:', origin);
-      
       if (!origin) return callback(null, true);
       
       if (allowedOrigins.includes(origin)) {
@@ -51,7 +45,6 @@ app.use(
         callback(null, true);
       } else {
         console.log('❌ Origin BLOCKED:', origin);
-        console.log('📋 Allowed origins:', allowedOrigins);
         callback(new Error("Not allowed by CORS"));
       }
     },
@@ -61,37 +54,30 @@ app.use(
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
-// Connect to MongoDB
-connectDB();
-
-// Create HTTP server & Socket.IO
+// ✅ Create HTTP server & Socket.IO BEFORE routes
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
   },
-  // ✅ Add ping settings for better connection stability
   pingTimeout: 60000,
   pingInterval: 25000,
 });
 
 // ✅ Track connected users
-const connectedUsers = new Map(); // userId -> socketId
+const connectedUsers = new Map();
 
-// Socket.IO connection handling with user rooms
+// ✅ Socket.IO connection handling
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
 
-  // ✅ Handle user authentication and room joining
   socket.on("authenticate", (userId) => {
     if (userId) {
-      // Join user-specific room
       socket.join(`user:${userId}`);
       connectedUsers.set(userId, socket.id);
       console.log(`👤 User ${userId} authenticated and joined room user:${userId}`);
       
-      // Send confirmation
       socket.emit("authenticated", { 
         success: true, 
         userId,
@@ -100,7 +86,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Handle manual room joining (alternative method)
   socket.on("join-user-room", (userId) => {
     if (userId) {
       socket.join(`user:${userId}`);
@@ -108,11 +93,9 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Handle disconnection
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
     
-    // Remove from connected users
     for (const [userId, socketId] of connectedUsers.entries()) {
       if (socketId === socket.id) {
         connectedUsers.delete(userId);
@@ -122,25 +105,32 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Handle reconnection
   socket.on("reconnect", (attemptNumber) => {
     console.log(`🔄 Client reconnected after ${attemptNumber} attempts:`, socket.id);
   });
 
-  // ✅ Handle ping/pong for connection health
   socket.on("ping", () => {
     socket.emit("pong", { timestamp: Date.now() });
   });
 });
 
-// CRITICAL: Make io available to ALL routes as middleware
+// ✅ CRITICAL: Make io available to ALL routes as middleware
 app.use((req, res, next) => {
   req.io = io;
-  req.connectedUsers = connectedUsers; // Also pass connected users map
+  req.connectedUsers = connectedUsers;
   next();
 });
 
 console.log("📡 Socket.io middleware initialized");
+
+// ✅ Import routes AFTER io is created
+import authRouter from "./routes/authRoutes.js";
+import postsRouter from "./routes/postsRoutes.js";
+import usersRouter from "./routes/userRoutes.js";
+import pickupRoutes from "./routes/pickupRoutes.js";
+import deliveryAgentRoutes from "./routes/deliveryAgentRoutes.js";
+import centersRoutes from "./routes/centersRoutes.js";
+import progressRoutes from "./routes/progressRoutes.js";
 
 // API Routes (MUST come AFTER io middleware)
 app.use("/api/auth", authRouter);
@@ -172,22 +162,24 @@ app.get("/health", (req, res) => {
   });
 });
 
-// ✅ Socket status endpoint for debugging
+// Socket status endpoint for debugging
 app.get("/api/socket-status", (req, res) => {
   res.json({
     success: true,
     connectedClients: io.engine.clientsCount,
     connectedUsers: Array.from(connectedUsers.keys()),
+    ioAvailable: typeof io !== 'undefined',
     timestamp: new Date().toISOString()
   });
 });
 
-// Start server - Railway will provide PORT
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📡 Socket.io ready with user room support`);
+  console.log(`✅ IO middleware is ${typeof io !== 'undefined' ? 'ACTIVE' : 'INACTIVE'}`);
 });
 
 // Export io for use in other files if needed
