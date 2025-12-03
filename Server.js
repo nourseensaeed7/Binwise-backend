@@ -35,7 +35,7 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
   "https://bin-wise-recycle.vercel.app",
-  "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",  // ✅ Add this
+  "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",
   "https://bin-wise-recycle-git-main-nourseens-projects.vercel.app",
   "https://backend-production-ec018.up.railway.app"
 ];
@@ -43,13 +43,17 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
+      console.log('🔍 Incoming request from origin:', origin); // ✅ Add this debug line
+      
       // Allow requests with no origin (like mobile apps or Postman)
       if (!origin) return callback(null, true);
       
       if (allowedOrigins.includes(origin)) {
+        console.log('✅ Origin allowed:', origin); // ✅ Add this
         callback(null, true);
       } else {
-        console.log('❌ CORS blocked origin:', origin); // Add this for debugging
+        console.log('❌ Origin BLOCKED:', origin); // ✅ Add this
+        console.log('📋 Allowed origins:', allowedOrigins); // ✅ Add this
         callback(new Error("Not allowed by CORS"));
       }
     },
