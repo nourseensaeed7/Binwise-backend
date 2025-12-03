@@ -34,10 +34,9 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
   "https://bin-wise-recycle.vercel.app",
+  "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",
   "https://bin-wise-recycle-git-main-nourseens-projects.vercel.app",
   "https://backend-production-ec018.up.railway.app"
-  // Add your Railway URL here after deployment
-  // "https://your-app.up.railway.app"
 ];
 
 app.use(
