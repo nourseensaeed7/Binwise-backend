@@ -122,7 +122,7 @@ router.post("/", authMiddleware, async (req, res) => {
     });
 
     // Emit event for admin dashboard
-    io.emit("new-pickup", pickup);
+    // io.emit("new-pickup", pickup);
 
     res.status(201).json({ 
       success: true, 
@@ -156,7 +156,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     await Pickup.findByIdAndDelete(id);
 
     // 📢 Emit event for admin dashboard
-    io.emit("delete-pickup", id);
+    // io.emit("delete-pickup", id);
 
     res.json({ success: true, message: "Pickup deleted successfully" });
   } catch (error) {
@@ -211,7 +211,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     await pickup.save();
 
     // 📢 Emit event for admin dashboard
-    io.emit("update-pickup", pickup);
+    // io.emit("update-pickup", pickup);
 
     res.json({ 
       success: true, 
@@ -243,7 +243,7 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
     await pickup.save();
 
     // 📢 Emit event for admin dashboard
-    io.emit("update-pickup", pickup);
+    // io.emit("update-pickup", pickup);
 
     res.json({ success: true, pickup });
   } catch (error) {
@@ -294,7 +294,7 @@ router.put("/:id/complete", authMiddleware, async (req, res) => {
       },
     });
     // 📢 Emit event for admin dashboard
-    io.emit("update-pickup", pickup);
+    // io.emit("update-pickup", pickup);
 
     res.json({ 
       success: true, 
