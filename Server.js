@@ -28,7 +28,6 @@ app.use(express.json());
 app.use(cookieParser());
 
 // CORS - Add your Railway URL after deployment
-// CORS - Add your Railway URL after deployment
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -43,17 +42,17 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      console.log('🔍 Incoming request from origin:', origin); // ✅ Add this debug line
+      console.log('🔍 Incoming request from origin:', origin);
       
       // Allow requests with no origin (like mobile apps or Postman)
       if (!origin) return callback(null, true);
       
       if (allowedOrigins.includes(origin)) {
-        console.log('✅ Origin allowed:', origin); // ✅ Add this
+        console.log('✅ Origin allowed:', origin);
         callback(null, true);
       } else {
-        console.log('❌ Origin BLOCKED:', origin); // ✅ Add this
-        console.log('📋 Allowed origins:', allowedOrigins); // ✅ Add this
+        console.log('❌ Origin BLOCKED:', origin);
+        console.log('📋 Allowed origins:', allowedOrigins);
         callback(new Error("Not allowed by CORS"));
       }
     },
@@ -68,7 +67,7 @@ connectDB();
 
 // Create HTTP server & Socket.IO
 const server = http.createServer(app);
-export const io = new Server(server, {
+const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
@@ -84,13 +83,15 @@ io.on("connection", (socket) => {
   });
 });
 
-// Make io available to routes
+// CRITICAL: Make io available to ALL routes as middleware
 app.use((req, res, next) => {
   req.io = io;
   next();
 });
 
-// API Routes
+console.log("📡 Socket.io middleware initialized");
+
+// API Routes (MUST come AFTER io middleware)
 app.use("/api/auth", authRouter);
 app.use("/api/posts", postsRouter);
 app.use("/api/users", usersRouter);
@@ -104,13 +105,18 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "BinWise Backend API is running ✅",
     status: "healthy",
+    socketIo: "enabled",
     timestamp: new Date().toISOString()
   });
 });
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ 
+    status: "ok",
+    socketIo: typeof io !== 'undefined' ? "connected" : "disconnected",
+    uptime: process.uptime()
+  });
 });
 
 // Start server - Railway will provide PORT
@@ -118,4 +124,8 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📡 Socket.io ready and available to routes`);
 });
+
+// Export io for use in other files if needed
+export { io };
