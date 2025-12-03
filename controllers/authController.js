@@ -330,14 +330,15 @@ export const isAuthenticated = async (req, res) => {
     res.json({
       success: true,
       userData: {
-        id: user._id,
+        _id: user._id,          // ✅ MongoDB ID
+        id: user._id.toString(), // ✅ Also as string for compatibility
         name: user.name,
         email: user.email,
         role: user.role,
         isAccountVerified: user.isAccountVerified,
         points: user.points || 0,
         gains: user.gains || 0,
-        activity: user.activity || [], // ✅ Include here too
+        activity: user.activity || [],
       },
     });
   } catch (error) {
@@ -373,7 +374,8 @@ export const getUserProfile = async (req, res) => {
     return res.json({
       success: true,
       user: {
-        id: user._id,
+        _id: user._id,          // ✅ MongoDB ID
+        id: user._id.toString(), // ✅ Also as string
         name: user.name,
         email: user.email,
         role: user.role,
@@ -386,7 +388,7 @@ export const getUserProfile = async (req, res) => {
         daysRecycled: user.daysRecycled || 0,
         badges: user.badges || [],
         stats: user.stats || {},
-        activity: user.activity || [], // ✅ CRITICAL: Include activities
+        activity: user.activity || [], // ✅ CRITICAL
         isAccountVerified: user.isAccountVerified,
         createdAt: user.createdAt,
       },
@@ -400,7 +402,6 @@ export const getUserProfile = async (req, res) => {
     });
   }
 };
-
 /* =====================================================
    UPDATE USER PROFILE
 ===================================================== */
