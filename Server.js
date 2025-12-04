@@ -114,7 +114,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ CRITICAL: Make io available to ALL routes as middleware
+// ✅ CRITICAL: Make io available to ALL routes - MUST BE BEFORE ROUTE IMPORTS
 app.use((req, res, next) => {
   req.io = io;
   req.connectedUsers = connectedUsers;
@@ -123,7 +123,7 @@ app.use((req, res, next) => {
 
 console.log("📡 Socket.io middleware initialized");
 
-// ✅ Import routes AFTER io is created
+// ✅ IMPORTANT: Import routes AFTER io middleware is set up
 import authRouter from "./routes/authRoutes.js";
 import postsRouter from "./routes/postsRoutes.js";
 import usersRouter from "./routes/userRoutes.js";
@@ -131,6 +131,14 @@ import pickupRoutes from "./routes/pickupRoutes.js";
 import deliveryAgentRoutes from "./routes/deliveryAgentRoutes.js";
 import centersRoutes from "./routes/centersRoutes.js";
 import progressRoutes from "./routes/progressRoutes.js";
+
+// ✅ Add debug middleware to verify io is available
+app.use((req, res, next) => {
+  if (!req.io) {
+    console.error("🚨 WARNING: req.io is not available in middleware chain!");
+  }
+  next();
+});
 
 // API Routes (MUST come AFTER io middleware)
 app.use("/api/auth", authRouter);
@@ -147,6 +155,7 @@ app.get("/", (req, res) => {
     message: "BinWise Backend API is running ✅",
     status: "healthy",
     socketIo: "enabled",
+    ioAvailable: typeof req.io !== 'undefined',
     connectedClients: io.engine.clientsCount,
     timestamp: new Date().toISOString()
   });
@@ -157,6 +166,7 @@ app.get("/health", (req, res) => {
   res.json({ 
     status: "ok",
     socketIo: typeof io !== 'undefined' ? "connected" : "disconnected",
+    ioAvailable: typeof req.io !== 'undefined',
     connectedClients: io.engine.clientsCount,
     uptime: process.uptime()
   });
@@ -166,9 +176,9 @@ app.get("/health", (req, res) => {
 app.get("/api/socket-status", (req, res) => {
   res.json({
     success: true,
+    ioAvailable: typeof req.io !== 'undefined',
     connectedClients: io.engine.clientsCount,
     connectedUsers: Array.from(connectedUsers.keys()),
-    ioAvailable: typeof io !== 'undefined',
     timestamp: new Date().toISOString()
   });
 });
