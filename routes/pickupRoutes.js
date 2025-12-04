@@ -48,37 +48,67 @@ const calculateGains = (points) => {
   return parseFloat((points * 0.15).toFixed(2));
 };
 
-// ✅ IMPROVED: Helper to safely emit socket events with user-specific rooms
+// ✅ ENHANCED: Helper to safely emit socket events with user-specific rooms
 const emitSocketEvent = (req, eventName, data, userId = null) => {
   try {
-    // ✅ Check if req.io exists
+    // ✅ Multiple safety checks
+    if (!req) {
+      console.log(`⚠️ req object not available for event: ${eventName}`);
+      return false;
+    }
+
     if (!req.io) {
-      console.log(`⚠️ Socket.io not available for event: ${eventName}`);
+      console.log(`⚠️ Socket.io not available on req object for event: ${eventName}`);
       return false;
     }
     
-    if (typeof req.io.emit === 'function') {
-      // Emit to all clients
-      req.io.emit(eventName, data);
-      
-      // Also emit to specific user room if userId provided
-      if (userId) {
-        req.io.to(`user:${userId}`).emit(eventName, data);
-        console.log(`📡 Socket event emitted to user ${userId}: ${eventName}`);
-      } else {
-        console.log(`📡 Socket event emitted globally: ${eventName}`);
-      }
-      
-      return true;
-    } else {
+    if (typeof req.io.emit !== 'function') {
       console.log(`⚠️ req.io.emit is not a function for event: ${eventName}`);
       return false;
     }
+    
+    // Emit to all clients (for admins/agents dashboard)
+    req.io.emit(eventName, data);
+    
+    // Also emit to specific user room if userId provided
+    if (userId) {
+      const userIdString = userId.toString();
+      req.io.to(`user:${userIdString}`).emit(eventName, data);
+      console.log(`📡 Socket event emitted to user ${userIdString}: ${eventName}`);
+    } else {
+      console.log(`📡 Socket event emitted globally: ${eventName}`);
+    }
+    
+    return true;
   } catch (error) {
     console.error(`❌ Error emitting socket event ${eventName}:`, error.message);
+    console.error(`Stack trace:`, error.stack);
     return false;
   }
 };
+
+// -----------------------------
+// 🧪 Debug endpoint to test Socket.IO
+// -----------------------------
+router.get("/test-socket", authMiddleware, async (req, res) => {
+  console.log("🧪 Testing Socket.IO availability...");
+  console.log("req.io exists?", typeof req.io !== 'undefined');
+  console.log("req.io.emit exists?", typeof req.io?.emit === 'function');
+  
+  const testResult = emitSocketEvent(req, "test-event", { 
+    message: "Test from pickup routes",
+    timestamp: new Date()
+  });
+  
+  res.json({
+    success: true,
+    socketAvailable: typeof req.io !== 'undefined',
+    emitFunctionExists: typeof req.io?.emit === 'function',
+    testEmitResult: testResult,
+    connectedClients: req.io?.engine?.clientsCount || 0
+  });
+});
+
 // -----------------------------
 // 🧾 Get all pickups (Admin only)
 // -----------------------------
@@ -121,6 +151,7 @@ router.post("/", authMiddleware, async (req, res) => {
   try {
     console.log("📥 Creating pickup request...");
     console.log("User ID:", req.userId);
+    console.log("🔍 req.io available?", typeof req.io !== 'undefined');
     
     const { items, address, pickupTime, time_slot, weight, instructions } = req.body;
 
@@ -161,7 +192,7 @@ router.post("/", authMiddleware, async (req, res) => {
       status: "pending",
     });
 
-    // Populate pickup details for socket emission
+    // Populate pickup details for socket emission and response
     await pickup.populate("userId", "name email");
 
     console.log("✅ Pickup created:", pickup._id);
@@ -178,14 +209,14 @@ router.post("/", authMiddleware, async (req, res) => {
       },
     });
 
-    // Emit socket event to user and admins
+    // ✅ Emit socket events (global for admins, specific for user)
     emitSocketEvent(req, "new-pickup", {
       pickup,
       userId: req.userId,
       timestamp: new Date()
     });
     
-    // Also emit specifically to user
+    // Emit specifically to user's room for instant UI update
     emitSocketEvent(req, "pickup-created", {
       pickup,
       message: "Your pickup request was created successfully"
@@ -215,6 +246,7 @@ router.put("/:id/complete", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     console.log("✅ Completing pickup:", id);
+    console.log("🔍 req.io available?", typeof req.io !== 'undefined');
     
     const pickup = await Pickup.findById(id);
     if (!pickup) {
@@ -265,19 +297,20 @@ router.put("/:id/complete", authMiddleware, async (req, res) => {
 
     console.log("✅ Pickup completed and user updated");
 
-    // Populate for socket emission
+    // Populate for socket emission and response
     await pickup.populate("userId", "name email");
     await pickup.populate("deliveryAgentId", "name email");
 
-    // Emit to all clients
+    // ✅ Emit to all clients (for admin dashboard)
     emitSocketEvent(req, "pickup-completed", {
       pickup,
       userId: pickup.userId._id,
       timestamp: new Date()
     });
     
-    // Emit specifically to the user
+    // ✅ Emit specifically to the user for instant notification
     emitSocketEvent(req, "points-awarded", {
+      pickupId: pickup._id,
       points: totalPoints,
       gains: totalGains,
       totalPoints: updatedUser.points,
@@ -310,6 +343,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     console.log("🗑️ Deleting pickup:", id);
+    console.log("🔍 req.io available?", typeof req.io !== 'undefined');
     
     const pickup = await Pickup.findById(id);
     if (!pickup) {
@@ -324,10 +358,13 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot delete completed pickups" });
     }
 
+    // Store userId before deletion
+    const userId = pickup.userId.toString();
+
     await Pickup.findByIdAndDelete(id);
 
     // Add activity log
-    await userModel.findByIdAndUpdate(pickup.userId, {
+    await userModel.findByIdAndUpdate(userId, {
       $push: {
         activity: {
           action: "Pickup request cancelled",
@@ -338,11 +375,18 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       },
     });
 
+    // ✅ Emit to all clients (for admin dashboard)
     emitSocketEvent(req, "pickup-deleted", { 
       pickupId: id,
-      userId: pickup.userId,
+      userId: userId,
       timestamp: new Date()
     });
+
+    // ✅ Emit specifically to user for instant UI update
+    emitSocketEvent(req, "pickup-deleted-user", { 
+      pickupId: id,
+      message: "Pickup request cancelled successfully"
+    }, userId);
 
     res.json({ success: true, message: "Pickup deleted successfully" });
   } catch (error) {
@@ -357,6 +401,9 @@ router.delete("/:id", authMiddleware, async (req, res) => {
 router.put("/:id", authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
+    console.log("✏️ Updating pickup:", id);
+    console.log("🔍 req.io available?", typeof req.io !== 'undefined');
+    
     const { address, items, weight, instructions, pickupTime, time_slot } = req.body;
 
     const pickup = await Pickup.findById(id);
@@ -396,11 +443,22 @@ router.put("/:id", authMiddleware, async (req, res) => {
 
     await pickup.save();
 
+    // Populate for response and socket emission
+    await pickup.populate("userId", "name email");
+    await pickup.populate("deliveryAgentId", "name email");
+
+    // ✅ Emit to all clients (for admin dashboard)
     emitSocketEvent(req, "pickup-updated", {
       pickup,
-      userId: pickup.userId,
+      userId: pickup.userId._id,
       timestamp: new Date()
     });
+
+    // ✅ Emit specifically to user for instant UI update
+    emitSocketEvent(req, "pickup-updated-user", {
+      pickup,
+      message: "Pickup updated successfully"
+    }, pickup.userId._id.toString());
 
     res.json({ 
       success: true, 
@@ -421,28 +479,63 @@ router.put("/:id", authMiddleware, async (req, res) => {
 router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) => {
   try {
     const { id } = req.params;
+    console.log("🚚 Assigning pickup:", id);
+    console.log("🔍 req.io available?", typeof req.io !== 'undefined');
+    
     const { deliveryAgentId, pickupTime } = req.body;
+
+    if (!deliveryAgentId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Delivery agent ID is required" 
+      });
+    }
 
     const pickup = await Pickup.findById(id);
     if (!pickup) {
       return res.status(404).json({ success: false, message: "Pickup not found" });
     }
 
+    // Store the user ID before updating
+    const userId = pickup.userId.toString();
+
     pickup.deliveryAgentId = deliveryAgentId;
     pickup.pickupTime = pickupTime ? new Date(pickupTime) : new Date();
     pickup.status = "assigned";
     await pickup.save();
 
+    // Populate all relationships for complete data
     await pickup.populate("deliveryAgentId", "name email");
+    await pickup.populate("userId", "name email");
 
+    console.log("✅ Pickup assigned to agent:", deliveryAgentId);
+
+    // ✅ Emit to all clients (for admin dashboard)
     emitSocketEvent(req, "pickup-assigned", {
       pickup,
-      userId: pickup.userId,
+      userId: userId,
       agentId: deliveryAgentId,
       timestamp: new Date()
     });
 
-    res.json({ success: true, pickup });
+    // ✅ Emit specifically to user for instant notification
+    emitSocketEvent(req, "pickup-assigned-user", {
+      pickup,
+      message: "A delivery agent has been assigned to your pickup",
+      agentName: pickup.deliveryAgentId?.name
+    }, userId);
+
+    // ✅ Emit to the assigned agent
+    emitSocketEvent(req, "pickup-assigned-agent", {
+      pickup,
+      message: "You have been assigned a new pickup"
+    }, deliveryAgentId);
+
+    res.json({ 
+      success: true, 
+      pickup,
+      message: "Pickup assigned successfully"
+    });
   } catch (error) {
     console.error("❌ Error assigning pickup:", error);
     res.status(500).json({ success: false, message: error.message });
