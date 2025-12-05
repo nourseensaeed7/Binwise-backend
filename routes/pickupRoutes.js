@@ -151,46 +151,82 @@ router.get("/my", authMiddleware, async (req, res) => {
 // -----------------------------
 // ♻️ Create a new pickup
 // -----------------------------
+// Replace your POST "/" route in pickupRoutes.js with this
+
 router.post("/", authMiddleware, async (req, res) => {
   try {
-    console.log("📥 Creating pickup request...");
+    console.log("📥 ===== NEW PICKUP REQUEST =====");
     console.log("   User ID:", req.userId);
     console.log("   req.io available?", typeof req.io !== 'undefined');
+    console.log("   📦 Full Request Body:", JSON.stringify(req.body, null, 2));
     
-    const { items, address, pickupTime, time_slot, weight, instructions } = req.body;
+    const { items, address, pickupTime, time_slot, weight, instructions, awardedPoints, gains } = req.body;
 
-    // ✅ Validation
-    if (!address || !items || !weight || !pickupTime || !time_slot) {
-      console.log("❌ Validation failed - missing fields");
+    console.log("   📋 Extracted fields:");
+    console.log("      - address:", address);
+    console.log("      - items:", items);
+    console.log("      - weight:", weight);
+    console.log("      - pickupTime:", pickupTime);
+    console.log("      - time_slot:", time_slot);
+    console.log("      - instructions:", instructions);
+
+    // ✅ Validation with detailed error messages
+    if (!address) {
+      console.log("❌ Missing: address");
       return res.status(400).json({
         success: false,
-        message: "Missing required fields: address, items, weight, pickupTime, and time_slot",
+        message: "Address is required",
       });
     }
 
-    if (!Array.isArray(items) || items.length === 0) {
-      console.log("❌ Validation failed - invalid items");
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      console.log("❌ Missing or invalid: items");
       return res.status(400).json({
         success: false,
         message: "Items must be a non-empty array",
       });
     }
 
-    console.log("✅ Validation passed");
+    if (!weight || isNaN(parseFloat(weight))) {
+      console.log("❌ Missing or invalid: weight");
+      return res.status(400).json({
+        success: false,
+        message: "Valid weight is required",
+      });
+    }
 
-    // ✅ Calculate points
-    const { processedItems, totalPoints } = calculatePointsAndDistributeWeight(items, weight);
-    console.log("   Calculated points:", totalPoints);
+    if (!pickupTime) {
+      console.log("❌ Missing: pickupTime");
+      return res.status(400).json({
+        success: false,
+        message: "Pickup time is required",
+      });
+    }
+
+    if (!time_slot) {
+      console.log("❌ Missing: time_slot");
+      return res.status(400).json({
+        success: false,
+        message: "Time slot is required",
+      });
+    }
+
+    console.log("✅ All validation passed");
+
+    // ✅ Calculate points (backend recalculates for security)
+    const { processedItems, totalPoints } = calculatePointsAndDistributeWeight(items, parseFloat(weight));
+    console.log("   💎 Calculated points:", totalPoints);
     
     const totalGains = calculateGains(totalPoints);
-    console.log("   Calculated gains:", totalGains);
+    console.log("   💰 Calculated gains:", totalGains);
 
-    // ✅ Create pickup
+    // ✅ Create pickup document
+    console.log("   📝 Creating pickup in database...");
     const pickup = await Pickup.create({
       userId: req.userId,
       address,
       items: processedItems, 
-      weight,
+      weight: parseFloat(weight),
       instructions: instructions || "",
       pickupTime: new Date(pickupTime),
       time_slot,
@@ -199,12 +235,13 @@ router.post("/", authMiddleware, async (req, res) => {
       status: "pending",
     });
 
-    // ✅ Populate pickup details
+    console.log("   ✅ Pickup created with ID:", pickup._id);
+
+    // ✅ Populate user details
     await pickup.populate("userId", "name email");
 
-    console.log("✅ Pickup created:", pickup._id);
-
-    // ✅ Add activity to user immediately
+    // ✅ Add activity to user
+    console.log("   📝 Adding activity to user...");
     await userModel.findByIdAndUpdate(req.userId, {
       $push: {
         activity: {
@@ -216,19 +253,23 @@ router.post("/", authMiddleware, async (req, res) => {
       },
     });
 
-    // ✅ Emit socket events using req.io (NOT io directly)
-    console.log("📡 Emitting socket events for new pickup...");
+    // ✅ Emit socket events
+    console.log("   📡 Emitting socket events...");
     
-    emitSocketEvent(req, "new-pickup", {
+    const emitSuccess = emitSocketEvent(req, "new-pickup", {
       pickup,
       userId: req.userId,
       timestamp: new Date()
     });
+    console.log("      new-pickup event result:", emitSuccess);
     
-    emitSocketEvent(req, "pickup-created", {
+    const emitUserSuccess = emitSocketEvent(req, "pickup-created", {
       pickup,
       message: "Your pickup request was created successfully"
     }, req.userId);
+    console.log("      pickup-created event result:", emitUserSuccess);
+
+    console.log("✅ ===== PICKUP REQUEST COMPLETED =====\n");
 
     res.status(201).json({ 
       success: true, 
@@ -237,13 +278,40 @@ router.post("/", authMiddleware, async (req, res) => {
       gains: totalGains,
       message: "Pickup request created successfully"
     });
+
   } catch (error) {
-    console.error("❌ Error creating pickup:", error);
-    console.error("   Stack:", error.stack);
+    console.error("❌ ===== ERROR CREATING PICKUP =====");
+    console.error("   Error name:", error.name);
+    console.error("   Error message:", error.message);
+    console.error("   Error code:", error.code);
+    
+    if (error.name === 'ValidationError') {
+      console.error("   Validation errors:", error.errors);
+      return res.status(400).json({ 
+        success: false, 
+        message: "Validation error",
+        errors: Object.keys(error.errors).map(key => ({
+          field: key,
+          message: error.errors[key].message
+        }))
+      });
+    }
+    
+    if (error.name === 'CastError') {
+      console.error("   Cast error on field:", error.path);
+      return res.status(400).json({ 
+        success: false, 
+        message: `Invalid ${error.path}: ${error.value}`
+      });
+    }
+
+    console.error("   Full stack:", error.stack);
+    
     res.status(500).json({ 
       success: false, 
       message: "Failed to create pickup",
-      error: error.message 
+      error: error.message,
+      errorType: error.name
     });
   }
 });
