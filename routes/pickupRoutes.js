@@ -48,10 +48,10 @@ const calculateGains = (points) => {
   return parseFloat((points * 0.15).toFixed(2));
 };
 
-// ✅ FIXED: Helper to safely emit socket events with admin room targeting
+// ✅ SAFE: Helper to emit socket events - NEVER uses 'io' directly
 const emitSocketEvent = (req, eventName, data, userId = null) => {
   try {
-    // ✅ Comprehensive safety checks
+    // ✅ Safety checks
     if (!req) {
       console.error(`⚠️ [${eventName}] req object is undefined`);
       return false;
@@ -78,8 +78,6 @@ const emitSocketEvent = (req, eventName, data, userId = null) => {
       const userIdString = userId.toString();
       req.io.to(`user:${userIdString}`).emit(eventName, data);
       console.log(`📡 [USER:${userIdString}] Emitted ${eventName}`);
-    } else {
-      console.log(`📡 [BROADCAST] Emitted ${eventName} to admin room only`);
     }
     
     return true;
@@ -158,7 +156,6 @@ router.post("/", authMiddleware, async (req, res) => {
     console.log("📥 Creating pickup request...");
     console.log("   User ID:", req.userId);
     console.log("   req.io available?", typeof req.io !== 'undefined');
-    console.log("   req.io.emit available?", typeof req.io?.emit === 'function');
     
     const { items, address, pickupTime, time_slot, weight, instructions } = req.body;
 
@@ -219,24 +216,19 @@ router.post("/", authMiddleware, async (req, res) => {
       },
     });
 
-    // ✅ Emit socket events
+    // ✅ Emit socket events using req.io (NOT io directly)
     console.log("📡 Emitting socket events for new pickup...");
     
-    // Emit to admin room
-    const adminEmit = emitSocketEvent(req, "new-pickup", {
+    emitSocketEvent(req, "new-pickup", {
       pickup,
       userId: req.userId,
       timestamp: new Date()
     });
     
-    // Emit to user's room
-    const userEmit = emitSocketEvent(req, "pickup-created", {
+    emitSocketEvent(req, "pickup-created", {
       pickup,
       message: "Your pickup request was created successfully"
     }, req.userId);
-    
-    console.log("   Admin emit result:", adminEmit);
-    console.log("   User emit result:", userEmit);
 
     res.status(201).json({ 
       success: true, 
@@ -318,7 +310,7 @@ router.put("/:id/complete", authMiddleware, async (req, res) => {
     await pickup.populate("userId", "name email");
     await pickup.populate("deliveryAgentId", "name email");
 
-    // ✅ Emit socket events
+    // ✅ Emit socket events using req.io
     console.log("📡 Emitting completion events...");
     
     const userIdString = pickup.userId._id.toString();
@@ -378,10 +370,13 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Cannot delete completed pickups" });
     }
 
+    // ✅ Store userId BEFORE deletion
     const userId = pickup.userId.toString();
 
+    // ✅ Delete pickup
     await Pickup.findByIdAndDelete(id);
 
+    // ✅ Update user activity
     await userModel.findByIdAndUpdate(userId, {
       $push: {
         activity: {
@@ -393,7 +388,9 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       },
     });
 
-    // ✅ Emit events
+    // ✅ Emit socket events using req.io (NOT io directly)
+    console.log("📡 Emitting deletion events...");
+    
     emitSocketEvent(req, "pickup-deleted", { 
       pickupId: id,
       userId: userId,
@@ -405,10 +402,17 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       message: "Pickup request cancelled successfully"
     }, userId);
 
+    console.log("✅ Pickup deleted successfully");
+
     res.json({ success: true, message: "Pickup deleted successfully" });
   } catch (error) {
     console.error("❌ Error deleting pickup:", error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error("   Stack:", error.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to delete pickup",
+      error: error.message 
+    });
   }
 });
 
@@ -462,7 +466,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     await pickup.populate("userId", "name email");
     await pickup.populate("deliveryAgentId", "name email");
 
-    // ✅ Emit events
+    // ✅ Emit socket events using req.io
     const userIdString = pickup.userId._id.toString();
     
     emitSocketEvent(req, "pickup-updated", {
@@ -485,7 +489,12 @@ router.put("/:id", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error updating pickup:", error);
-    res.status(500).json({ success: false, message: error.message });
+    console.error("   Stack:", error.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to update pickup",
+      error: error.message 
+    });
   }
 });
 
@@ -512,6 +521,7 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
       return res.status(404).json({ success: false, message: "Pickup not found" });
     }
 
+    // ✅ Store userId BEFORE updating
     const userId = pickup.userId.toString();
 
     pickup.deliveryAgentId = deliveryAgentId;
@@ -526,7 +536,7 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
     console.log("✅ Pickup assigned to agent:", deliveryAgentId);
     console.log("   Agent name:", pickup.deliveryAgentId?.name);
 
-    // ✅ Emit socket events
+    // ✅ Emit socket events using req.io (NOT io directly)
     console.log("📡 Emitting assignment events...");
     
     emitSocketEvent(req, "pickup-assigned", {
@@ -546,6 +556,8 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
       pickup,
       message: "You have been assigned a new pickup"
     }, deliveryAgentId);
+
+    console.log("✅ Assignment events emitted successfully");
 
     res.json({ 
       success: true, 
