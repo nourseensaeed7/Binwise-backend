@@ -60,9 +60,11 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
   },
   pingTimeout: 60000,
   pingInterval: 25000,
+  transports: ['websocket', 'polling'],
 });
 
 // ✅ Track connected users
@@ -93,6 +95,11 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("join-admin-room", () => {
+    socket.join("admin");
+    console.log(`👔 Admin joined admin room`);
+  });
+
   socket.on("disconnect", () => {
     console.log("❌ Client disconnected:", socket.id);
     
@@ -121,7 +128,20 @@ app.use((req, res, next) => {
   next();
 });
 
-console.log("📡 Socket.io middleware initialized");
+console.log("📡 Socket.io middleware initialized - io will be available in all routes");
+
+// ✅ Add debug middleware to verify io is available
+app.use((req, res, next) => {
+  if (!req.io) {
+    console.error("🚨 CRITICAL ERROR: req.io is not available in middleware chain!");
+  } else {
+    // Only log this occasionally to avoid spam
+    if (Math.random() < 0.01) {
+      console.log("✅ req.io is available and functioning");
+    }
+  }
+  next();
+});
 
 // ✅ IMPORTANT: Import routes AFTER io middleware is set up
 import authRouter from "./routes/authRoutes.js";
@@ -131,16 +151,13 @@ import pickupRoutes from "./routes/pickupRoutes.js";
 import deliveryAgentRoutes from "./routes/deliveryAgentRoutes.js";
 import centersRoutes from "./routes/centersRoutes.js";
 import progressRoutes from "./routes/progressRoutes.js";
+import testRoutes from "./routes/testRoutes.js";
 
-// ✅ Add debug middleware to verify io is available
-app.use((req, res, next) => {
-  if (!req.io) {
-    console.error("🚨 WARNING: req.io is not available in middleware chain!");
-  }
-  next();
-});
+  import { socketDebugMiddleware } from './middleware/socketDebug.js';
 
 // API Routes (MUST come AFTER io middleware)
+app.use(socketDebugMiddleware);
+app.use("/api/test", testRoutes);
 app.use("/api/auth", authRouter);
 app.use("/api/posts", postsRouter);
 app.use("/api/users", usersRouter);
@@ -168,6 +185,7 @@ app.get("/health", (req, res) => {
     socketIo: typeof io !== 'undefined' ? "connected" : "disconnected",
     ioAvailable: typeof req.io !== 'undefined',
     connectedClients: io.engine.clientsCount,
+    connectedUsers: Array.from(connectedUsers.keys()).length,
     uptime: process.uptime()
   });
 });
@@ -177,9 +195,20 @@ app.get("/api/socket-status", (req, res) => {
   res.json({
     success: true,
     ioAvailable: typeof req.io !== 'undefined',
+    ioEmitExists: typeof req.io?.emit === 'function',
     connectedClients: io.engine.clientsCount,
     connectedUsers: Array.from(connectedUsers.keys()),
     timestamp: new Date().toISOString()
+  });
+});
+
+// Error handling middleware - MUST BE LAST
+app.use((err, req, res, next) => {
+  console.error("❌ Express Error Handler:", err);
+  res.status(500).json({
+    success: false,
+    message: err.message || "Internal server error",
+    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 });
 
@@ -190,6 +219,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📡 Socket.io ready with user room support`);
   console.log(`✅ IO middleware is ${typeof io !== 'undefined' ? 'ACTIVE' : 'INACTIVE'}`);
+  console.log(`🔗 Allowed origins:`, allowedOrigins.join(', '));
 });
 
 // Export io for use in other files if needed
