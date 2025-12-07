@@ -168,26 +168,43 @@ export const sendVerifyOtp = async (req, res) => {
         .status(404)
         .json({ success: false, message: "User not found" });
 
+    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.verifyOtp = otp;
-    user.verifyOtpExpireAt = Date.now() + 15 * 60 * 1000;
+    user.verifyOtpExpireAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
     await user.save();
 
-    const emailHtml = EMAIL_VERIFY_TEMPLATE.replace("{OTP}", otp);
+    console.log("📧 Sending verification OTP to:", user.email);
 
-    await transporter.sendMail({
-      from: process.env.SENDER_EMAIL,
+    // ✅ Prepare email with placeholders replaced
+    const emailHtml = prepareEmailTemplate(EMAIL_VERIFY_TEMPLATE, {
+      EMAIL: user.email,
+      OTP: otp
+    });
+
+    // ✅ Send email using Gmail SMTP
+    const result = await sendEmail({
       to: user.email,
       subject: "Verify Your Email",
       html: emailHtml,
     });
 
+    if (!result.success) {
+      console.error("❌ Failed to send verification email:", result.error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send verification email. Please try again later.",
+        error: result.error
+      });
+    }
+
+    console.log("✅ Verification OTP sent successfully");
     return res.json({
       success: true,
       message: "OTP sent to your email successfully",
     });
   } catch (error) {
-    console.error("Verify OTP error:", error);
+    console.error("❌ Verify OTP error:", error);
     return res
       .status(500)
       .json({ success: false, message: "Error sending OTP email" });
@@ -251,23 +268,43 @@ export const sendResetOtp = async (req, res) => {
     if (!user)
       return res.status(404).json({ success: false, message: "User not found" });
 
+    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.resetOtp = otp;
-    user.resetOtpExpireAt = Date.now() + 15 * 60 * 1000;
+    user.resetOtpExpireAt = Date.now() + 15 * 60 * 1000; // 15 minutes
     await user.save();
 
-    const emailHtml = PASSWORD_RESET_TEMPLATE.replace("{OTP}", otp);
+    console.log("📧 Sending password reset OTP to:", email);
 
-    await transporter.sendMail({
-      from: process.env.SENDER_EMAIL,
+    // ✅ Prepare email with placeholders replaced
+    const emailHtml = prepareEmailTemplate(PASSWORD_RESET_TEMPLATE, {
+      EMAIL: email,
+      OTP: otp
+    });
+
+    // ✅ Send email using Gmail SMTP
+    const result = await sendEmail({
       to: email,
       subject: "Password Reset OTP",
       html: emailHtml,
     });
 
-    return res.json({ success: true, message: "Reset OTP sent to your email" });
+    if (!result.success) {
+      console.error("❌ Failed to send reset email:", result.error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send reset email. Please try again later.",
+        error: result.error
+      });
+    }
+
+    console.log("✅ Password reset OTP sent successfully");
+    return res.json({ 
+      success: true, 
+      message: "Reset OTP sent to your email" 
+    });
   } catch (error) {
-    console.error("Send reset OTP error:", error);
+    console.error("❌ Send reset OTP error:", error);
     return res
       .status(500)
       .json({ success: false, message: "Server error, please try again" });
