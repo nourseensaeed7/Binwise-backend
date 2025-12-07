@@ -19,7 +19,7 @@ const pickupSchema = new mongoose.Schema(
     time_slot: { type: String, required: true },
     status: { type: String, enum: ["pending", "assigned", "completed"], default: "pending" },
     awardedPoints: { type: Number, default: 0 },
-    deliveryAgentId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    deliveryAgentId: { type: mongoose.Schema.Types.ObjectId, ref: "DeliveryAgent" },
     gains: { type: Number, default: 0 },
 
   },
