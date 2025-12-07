@@ -555,9 +555,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// -----------------------------
 // 🚚 Assign pickup to agent (admin)
-// -----------------------------
 router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) => {
   try {
     const { id } = req.params;
@@ -573,45 +571,55 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
       });
     }
 
-    // ✅ VERIFY THE AGENT EXISTS
-    const agent = await userModel.findById(deliveryAgentId);
-    console.log("   Agent found?", !!agent);
-    console.log("   Agent details:", agent ? { name: agent.name, email: agent.email, role: agent.role } : "NOT FOUND");
-    
-    if (!agent) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Delivery agent not found" 
-      });
-    }
+    // ✅ Update pickup directly with findByIdAndUpdate
+    const updatedPickup = await Pickup.findByIdAndUpdate(
+      id,
+      {
+        deliveryAgentId: deliveryAgentId,
+        pickupTime: pickupTime ? new Date(pickupTime) : new Date(),
+        status: "assigned"
+      },
+      { new: true }
+    )
+    .populate("deliveryAgentId", "name email")
+    .populate("userId", "name email");
 
-    const pickup = await Pickup.findById(id);
-    if (!pickup) {
+    if (!updatedPickup) {
       return res.status(404).json({ success: false, message: "Pickup not found" });
     }
 
-    // ✅ Store userId BEFORE updating
-    const userId = pickup.userId.toString();
+    console.log("✅ Pickup assigned successfully");
+    console.log("   Agent name:", updatedPickup.deliveryAgentId?.name);
 
-    pickup.deliveryAgentId = deliveryAgentId;
-    pickup.pickupTime = pickupTime ? new Date(pickupTime) : new Date();
-    pickup.status = "assigned";
+    // ✅ Store userId for socket events
+    const userId = updatedPickup.userId._id.toString();
+
+    // ✅ Emit socket events
+    console.log("📡 Emitting assignment events...");
     
-    console.log("   Saving pickup with deliveryAgentId:", pickup.deliveryAgentId);
-    await pickup.save();
-    console.log("   Pickup saved successfully");
+    emitSocketEvent(req, "pickup-assigned", {
+      pickup: updatedPickup,
+      userId: userId,
+      agentId: deliveryAgentId,
+      timestamp: new Date()
+    });
 
-    // ✅ FIX: Re-fetch the document with populated fields
-    const populatedPickup = await Pickup.findById(id)
-      .populate("deliveryAgentId", "name email")
-      .populate("userId", "name email");
+    emitSocketEvent(req, "pickup-assigned-user", {
+      pickup: updatedPickup,
+      message: `Agent ${updatedPickup.deliveryAgentId?.name || 'assigned'} will handle your pickup`,
+      agentName: updatedPickup.deliveryAgentId?.name
+    }, userId);
 
-    console.log("   After populate - deliveryAgentId:", populatedPickup.deliveryAgentId);
-    console.log("   Agent name:", populatedPickup.deliveryAgentId?.name);
+    emitSocketEvent(req, "pickup-assigned-agent", {
+      pickup: updatedPickup,
+      message: "You have been assigned a new pickup"
+    }, deliveryAgentId);
+
+    console.log("✅ Assignment events emitted successfully");
 
     res.json({ 
       success: true, 
-      pickup: populatedPickup,
+      pickup: updatedPickup,
       message: "Pickup assigned successfully"
     });
   } catch (error) {

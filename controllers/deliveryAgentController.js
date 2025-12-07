@@ -1,16 +1,22 @@
-import DeliveryAgent from "../models/DeliveryAgent.js";
+import userModel from "../models/userModel.js";
 
 export const createAgent = async (req, res) => {
   try {
     const { name, email, phone } = req.body;
 
-    const existing = await DeliveryAgent.findOne({ email });
+    const existing = await userModel.findOne({ email });
     if (existing)
       return res
         .status(400)
         .json({ success: false, message: "Agent already exists" });
 
-    const agent = await DeliveryAgent.create({ name, email, phone });
+    const agent = await userModel.create({ 
+      name, 
+      email, 
+      phone,
+      role: 'delivery-agent',
+      password: 'temporary-password-to-change' // You'll need to handle this properly
+    });
     res.json({ success: true, agent });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -19,7 +25,7 @@ export const createAgent = async (req, res) => {
 
 export const getAllAgents = async (req, res) => {
   try {
-    const agents = await DeliveryAgent.find();
+    const agents = await userModel.find({ role: 'delivery-agent' });
     res.json({ success: true, agents });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -31,7 +37,7 @@ export const updateAgent = async (req, res) => {
     const { id } = req.params;
     const { name, email, phone, available } = req.body;
 
-    const updated = await DeliveryAgent.findByIdAndUpdate(
+    const updated = await userModel.findByIdAndUpdate(
       id,
       { name, email, phone, available },
       { new: true }
@@ -51,7 +57,7 @@ export const updateAgent = async (req, res) => {
 export const deleteAgent = async (req, res) => {
   try {
     const { id } = req.params;
-    await DeliveryAgent.findByIdAndDelete(id);
+    await userModel.findByIdAndDelete(id);
     res.json({ success: true, message: "Agent deleted" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
