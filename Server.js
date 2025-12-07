@@ -155,7 +155,7 @@ app.use("/api/users", usersRouter);
 app.use("/api/pickups", pickupRoutes);
 app.use("/api/delivery-agents", deliveryAgentRoutes);
 app.use("/api/centers", centersRoutes);
-app.use("/api/progress", progressRoutes);
+app.use("/api", progressRoutes);
 
 // Root route
 app.get("/", (req, res) => {
