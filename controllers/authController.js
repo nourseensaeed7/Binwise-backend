@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import userModel from "../models/userModel.js";
-import transporter from "../config/nodemailer.js";
+import { sendEmail, prepareEmailTemplate } from "../config/nodemailer.js";
 import {
   EMAIL_VERIFY_TEMPLATE,
   PASSWORD_RESET_TEMPLATE,
@@ -355,7 +355,6 @@ export const resetPassword = async (req, res) => {
 ===================================================== */
 export const isAuthenticated = async (req, res) => {
   try {
-    // ✅ FIXED: Changed User to userModel
     const user = await userModel.findById(req.userId).select("-password");
     
     if (!user) {
@@ -392,7 +391,6 @@ export const getUserProfile = async (req, res) => {
   try {
     console.log("📋 Fetching profile for user:", req.userId);
     
-    // ✅ FIXED: Changed User to userModel
     const user = await userModel.findById(req.userId).select("-password");
     
     if (!user) {
@@ -459,7 +457,6 @@ export const updateProfile = async (req, res) => {
       console.log("📸 New profile image:", imageUrl);
     }
 
-    // ✅ FIXED: Changed User to userModel
     const user = await userModel.findByIdAndUpdate(
       userId,
       updateData,
