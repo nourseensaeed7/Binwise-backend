@@ -51,39 +51,23 @@ const calculateGains = (points) => {
 // ✅ SAFE: Helper to emit socket events - NEVER uses 'io' directly
 const emitSocketEvent = (req, eventName, data, userId = null) => {
   try {
-    // ✅ Safety checks
-    if (!req) {
-      console.error(`⚠️ [${eventName}] req object is undefined`);
-      return false;
-    }
-
-    if (!req.io) {
-      console.error(`⚠️ [${eventName}] req.io is undefined - Socket.io not available`);
-      console.error(`   This usually means the io middleware didn't run before this route`);
+    if (!req || !req.io) {
+      console.error(`⚠️ [${eventName}] req.io not available`);
       return false;
     }
     
-    if (typeof req.io.emit !== 'function') {
-      console.error(`⚠️ [${eventName}] req.io.emit is not a function`);
-      console.error(`   req.io type:`, typeof req.io);
-      return false;
-    }
-    
-    // ✅ Emit to admin room for admin dashboard
+    // ✅ Use req.io, not io directly
     req.io.to("admin").emit(eventName, data);
-    console.log(`📡 [ADMIN] Emitted ${eventName} to admin room`);
+    console.log(`📡 [ADMIN] Emitted ${eventName}`);
     
-    // ✅ Also emit to specific user room if userId provided
     if (userId) {
-      const userIdString = userId.toString();
-      req.io.to(`user:${userIdString}`).emit(eventName, data);
-      console.log(`📡 [USER:${userIdString}] Emitted ${eventName}`);
+      req.io.to(`user:${userId}`).emit(eventName, data);
+      console.log(`📡 [USER:${userId}] Emitted ${eventName}`);
     }
     
     return true;
   } catch (error) {
-    console.error(`❌ Error emitting socket event ${eventName}:`, error.message);
-    console.error(`   Stack:`, error.stack);
+    console.error(`❌ Error emitting ${eventName}:`, error.message);
     return false;
   }
 };
