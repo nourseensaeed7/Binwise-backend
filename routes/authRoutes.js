@@ -1,4 +1,3 @@
-
 import express from "express";
 import multer from "multer";
 import path from "path";
@@ -15,7 +14,8 @@ import {
   updateProfile,
 } from "../controllers/authController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
-import User from "../models/userModel.js"; // <-- ensure this import exists
+import userModel from "../models/userModel.js"; // ✅ FIXED: Changed from User to userModel
+
 const router = express.Router();
 
 /* =====================================================
@@ -23,7 +23,7 @@ const router = express.Router();
 ===================================================== */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/"); // فولدر لتخزين الصور
+    cb(null, "uploads/");
   },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -70,7 +70,7 @@ router.get("/profile", authMiddleware, async (req, res) => {
   try {
     console.log("📋 Fetching profile for user:", req.userId);
     
-    // ✅ Fetch user with all fields except password
+    // ✅ FIXED: Changed userModel to match import
     const user = await userModel.findById(req.userId).select("-password");
     
     if (!user) {
@@ -167,11 +167,10 @@ router.get("/is-auth", authMiddleware, async (req, res) => {
     });
   }
 });
+
 /* =====================================================
    ADD USER ACTIVITY (from AI detection or manual pickup)
 ===================================================== */
-
-
 router.post("/add-activity", authMiddleware, async (req, res) => {
   try {
     const { activities } = req.body;
@@ -180,7 +179,7 @@ router.post("/add-activity", authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, message: "Activities array required" });
     }
 
-    await User.findByIdAndUpdate(req.user.id, {
+    await userModel.findByIdAndUpdate(req.userId, {
       $push: { activity: { $each: activities } }
     });
 
@@ -191,8 +190,6 @@ router.post("/add-activity", authMiddleware, async (req, res) => {
 });
 
 export default router;
-
-
 
 
 
