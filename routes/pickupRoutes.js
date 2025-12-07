@@ -169,7 +169,12 @@ router.post("/", authMiddleware, async (req, res) => {
     console.log("      - pickupTime:", pickupTime);
     console.log("      - time_slot:", time_slot);
     console.log("      - instructions:", instructions);
-
+    // ✅ ADD THIS SAFETY CHECK
+    if (!req.io) {
+      console.error("🚨 CRITICAL: req.io is undefined!");
+      console.error("   This means Socket.IO middleware did not run");
+      console.error("   Pickup will be created but no real-time events will be emitted");
+    }
     // ✅ Validation with detailed error messages
     if (!address) {
       console.log("❌ Missing: address");

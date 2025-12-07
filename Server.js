@@ -18,30 +18,52 @@ connectDB();
 
 const app = express();
 
-// Middleware
+// ✅ CRITICAL: Create HTTP server & Socket.IO BEFORE ANYTHING ELSE
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://127.0.0.1:5173",
+      "http://127.0.0.1:5174",
+      "https://bin-wise-recycle.vercel.app",
+      "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",
+      "https://bin-wise-recycle-git-main-nourseens-projects.vercel.app",
+      "https://backend-production-ec018.up.railway.app"
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  transports: ['websocket', 'polling'],
+});
+
+console.log("✅ Socket.IO server created");
+
+// Basic Middleware
 app.use(express.json());
 app.use(cookieParser());
 
 // CORS
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-  "https://bin-wise-recycle.vercel.app",
-  "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",
-  "https://bin-wise-recycle-git-main-nourseens-projects.vercel.app",
-  "https://backend-production-ec018.up.railway.app"
-];
-
 app.use(
   cors({
     origin: (origin, callback) => {
-      console.log('🔍 Incoming request from origin:', origin);
+      const allowedOrigins = [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "https://bin-wise-recycle.vercel.app",
+        "https://bin-wise-recycle-7s1bdhcsn-nourseens-projects.vercel.app",
+        "https://bin-wise-recycle-git-main-nourseens-projects.vercel.app",
+        "https://backend-production-ec018.up.railway.app"
+      ];
+      
       if (!origin) return callback(null, true);
       
       if (allowedOrigins.includes(origin)) {
-        console.log('✅ Origin allowed:', origin);
         callback(null, true);
       } else {
         console.log('❌ Origin BLOCKED:', origin);
@@ -54,23 +76,17 @@ app.use(
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
-// ✅ Create HTTP server & Socket.IO BEFORE routes
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-  },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  transports: ['websocket', 'polling'],
+// ✅ CRITICAL: Attach io to EVERY request BEFORE importing routes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
 });
 
-// ✅ Track connected users
-const connectedUsers = new Map();
+console.log("✅ Socket.io middleware attached to all routes");
 
 // ✅ Socket.IO connection handling
+const connectedUsers = new Map();
+
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
 
@@ -121,29 +137,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// ✅ CRITICAL: Make io available to ALL routes - MUST BE BEFORE ROUTE IMPORTS
-app.use((req, res, next) => {
-  req.io = io;
-  req.connectedUsers = connectedUsers;
-  next();
-});
-
-console.log("📡 Socket.io middleware initialized - io will be available in all routes");
-
-// ✅ Add debug middleware to verify io is available
-app.use((req, res, next) => {
-  if (!req.io) {
-    console.error("🚨 CRITICAL ERROR: req.io is not available in middleware chain!");
-  } else {
-    // Only log this occasionally to avoid spam
-    if (Math.random() < 0.01) {
-      console.log("✅ req.io is available and functioning");
-    }
-  }
-  next();
-});
-
-// ✅ IMPORTANT: Import routes AFTER io middleware is set up
+// ✅ NOW import routes (they will have access to req.io)
 import authRouter from "./routes/authRoutes.js";
 import postsRouter from "./routes/postsRoutes.js";
 import usersRouter from "./routes/userRoutes.js";
@@ -153,10 +147,7 @@ import centersRoutes from "./routes/centersRoutes.js";
 import progressRoutes from "./routes/progressRoutes.js";
 import testRoutes from "./routes/testRoutes.js";
 
-  import { socketDebugMiddleware } from './middleware/socketDebug.js';
-
-// API Routes (MUST come AFTER io middleware)
-app.use(socketDebugMiddleware);
+// API Routes
 app.use("/api/test", testRoutes);
 app.use("/api/auth", authRouter);
 app.use("/api/posts", postsRouter);
@@ -219,7 +210,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📡 Socket.io ready with user room support`);
   console.log(`✅ IO middleware is ${typeof io !== 'undefined' ? 'ACTIVE' : 'INACTIVE'}`);
-  console.log(`🔗 Allowed origins:`, allowedOrigins.join(', '));
 });
 
 // Export io for use in other files if needed
