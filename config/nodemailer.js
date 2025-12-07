@@ -137,6 +137,8 @@ export const prepareEmailTemplate = (template, replacements) => {
 
 // Verify configuration on startup
 const verifyConfiguration = () => {
+  const senderEmail = process.env.SENDER_EMAIL || process.env.GMAIL_USER;
+  
   console.log('\n🔧 Email Configuration Check:');
   console.log('   SendGrid API Key:', SENDGRID_API_KEY ? '✅ Set' : '❌ Missing');
   console.log('   Gmail User:', process.env.GMAIL_USER ? '✅ Set' : '❌ Missing');
