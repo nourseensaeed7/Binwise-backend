@@ -3,9 +3,14 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // ==========================================
-// Gmail SMTP Configuration
+// Dual SMTP Configuration (Gmail + SendGrid)
 // ==========================================
-const transporter = nodemailer.createTransport({
+// Priority: Try Gmail first, fallback to SendGrid if Gmail fails
+
+const SMTP_PROVIDER = process.env.SMTP_PROVIDER || 'auto'; // 'gmail', 'sendgrid', or 'auto'
+
+// Gmail Configuration
+const gmailConfig = {
   service: 'gmail',
   auth: {
     user: process.env.GMAIL_USER,
@@ -14,49 +19,123 @@ const transporter = nodemailer.createTransport({
   connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 10000,
-  pool: true,
-  maxConnections: 5,
-  maxMessages: 100,
-});
+};
 
-// Verify connection without crashing server
-transporter.verify()
-  .then(() => {
-    console.log("✅ Gmail SMTP ready to send emails");
-    console.log("📧 Sender:", process.env.GMAIL_USER);
-  })
-  .catch((error) => {
-    console.warn("⚠️  Gmail SMTP connection failed:", error.message);
-    console.log("📧 Server will continue running, but email functionality may be limited");
-  });
+// SendGrid Configuration
+const sendgridConfig = {
+  host: 'smtp.sendgrid.net',
+  port: 587,
+  secure: false,
+  auth: {
+    user: 'apikey', // SendGrid always uses 'apikey' as username
+    pass: process.env.SENDGRID_API_KEY,
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 10000,
+};
 
-// ✅ Helper function to send emails with error handling
-export const sendEmail = async (mailOptions) => {
+// Choose configuration based on SMTP_PROVIDER
+let primaryConfig, fallbackConfig, primaryName, fallbackName;
+
+if (SMTP_PROVIDER === 'sendgrid') {
+  primaryConfig = sendgridConfig;
+  fallbackConfig = gmailConfig;
+  primaryName = 'SendGrid';
+  fallbackName = 'Gmail';
+} else {
+  // Default: Gmail primary, SendGrid fallback
+  primaryConfig = gmailConfig;
+  fallbackConfig = sendgridConfig;
+  primaryName = 'Gmail';
+  fallbackName = 'SendGrid';
+}
+
+// Create transporters
+const primaryTransporter = nodemailer.createTransport(primaryConfig);
+const fallbackTransporter = nodemailer.createTransport(fallbackConfig);
+
+// Track which transporter is working
+let activeTransporter = primaryTransporter;
+let activeProvider = primaryName;
+
+// Verify connections (non-blocking)
+const verifyTransporters = async () => {
   try {
-    const info = await transporter.sendMail({
-      from: `"${process.env.APP_NAME || 'BinWise'}" <${process.env.GMAIL_USER}>`,
+    await primaryTransporter.verify();
+    console.log(`✅ ${primaryName} SMTP ready (PRIMARY)`);
+    activeTransporter = primaryTransporter;
+    activeProvider = primaryName;
+  } catch (error) {
+    console.warn(`⚠️  ${primaryName} SMTP failed:`, error.message);
+    console.log(`🔄 Trying ${fallbackName} as fallback...`);
+    
+    try {
+      await fallbackTransporter.verify();
+      console.log(`✅ ${fallbackName} SMTP ready (FALLBACK)`);
+      activeTransporter = fallbackTransporter;
+      activeProvider = fallbackName;
+    } catch (fallbackError) {
+      console.error(`❌ Both ${primaryName} and ${fallbackName} SMTP failed!`);
+      console.log("📧 Email functionality will be limited");
+      console.log("💡 Check your credentials:");
+      console.log("   - GMAIL_USER and GMAIL_APP_PASSWORD");
+      console.log("   - SENDGRID_API_KEY");
+    }
+  }
+};
+
+// Run verification
+verifyTransporters();
+
+// Helper function to send emails with automatic fallback
+export const sendEmail = async (mailOptions) => {
+  const senderEmail = process.env.SENDER_EMAIL || process.env.GMAIL_USER;
+  const appName = process.env.APP_NAME || 'BinWise';
+
+  try {
+    // Try primary transporter first
+    const info = await activeTransporter.sendMail({
+      from: `"${appName}" <${senderEmail}>`,
       ...mailOptions,
     });
-    console.log("📧 Email sent successfully:", info.messageId);
+    
+    console.log(`📧 Email sent via ${activeProvider}:`, info.messageId);
     console.log("   To:", mailOptions.to);
     console.log("   Subject:", mailOptions.subject);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error("❌ Email send failed:", error.message);
     
-    if (error.code === 'EAUTH') {
-      console.error("🔑 Authentication failed - Check your App Password");
-    } else if (error.code === 'ESOCKET') {
-      console.error("🌐 Network error - Check Railway network settings");
-    } else if (error.code === 'ETIMEDOUT') {
-      console.error("⏱️  Connection timeout - Gmail SMTP may be blocked");
+    return { success: true, messageId: info.messageId, provider: activeProvider };
+  } catch (error) {
+    console.error(`❌ ${activeProvider} failed:`, error.message);
+    
+    // Try fallback transporter
+    if (activeTransporter === primaryTransporter) {
+      console.log(`🔄 Retrying with ${fallbackName}...`);
+      
+      try {
+        const fallbackInfo = await fallbackTransporter.sendMail({
+          from: `"${appName}" <${senderEmail}>`,
+          ...mailOptions,
+        });
+        
+        console.log(`✅ Email sent via ${fallbackName} (fallback):`, fallbackInfo.messageId);
+        
+        // Switch to fallback for future emails
+        activeTransporter = fallbackTransporter;
+        activeProvider = fallbackName;
+        
+        return { success: true, messageId: fallbackInfo.messageId, provider: fallbackName };
+      } catch (fallbackError) {
+        console.error(`❌ ${fallbackName} also failed:`, fallbackError.message);
+        return { success: false, error: `Both providers failed: ${error.message}` };
+      }
     }
     
     return { success: false, error: error.message };
   }
 };
 
-// ✅ Helper to replace placeholders in email templates
+// Helper to replace placeholders in email templates
 export const prepareEmailTemplate = (template, replacements) => {
   let result = template;
   Object.keys(replacements).forEach(key => {
@@ -66,55 +145,4 @@ export const prepareEmailTemplate = (template, replacements) => {
   return result;
 };
 
-// ✅ Default export
-export default transporter;
-
-// import nodemailer from 'nodemailer';
-// import dotenv from 'dotenv';
-// dotenv.config();
-
-// const transporter = nodemailer.createTransport({
-//   host: 'smtp-relay.brevo.com',
-//   port: 587,
-//   secure: false, // Use TLS
-//   auth: {
-//     user: process.env.SMTP_USER,
-//     pass: process.env.SMTP_PASSWORD,
-//   },
-//   // Add timeout configurations to prevent hanging
-//   connectionTimeout: 10000, // 10 seconds
-//   greetingTimeout: 10000,
-//   socketTimeout: 10000,
-//   // Additional options for better reliability
-//   pool: true, // Use pooled connections
-//   maxConnections: 5,
-//   maxMessages: 100,
-// });
-
-// // Make verification non-blocking - don't crash server if SMTP fails
-// transporter.verify()
-//   .then(() => {
-//     console.log("✅ SMTP ready to send emails (Brevo)");
-//   })
-//   .catch((error) => {
-//     console.warn("⚠️  SMTP connection failed:", error.message);
-//     console.log("📧 Server will continue running, but email functionality may be limited");
-//     console.log("💡 Check your Railway firewall settings or Brevo credentials");
-//   });
-
-// // Helper function to send emails with error handling
-// export const sendEmail = async (mailOptions) => {
-//   try {
-//     const info = await transporter.sendMail({
-//       from: process.env.SENDER_EMAIL,
-//       ...mailOptions,
-//     });
-//     console.log("📧 Email sent successfully:", info.messageId);
-//     return { success: true, messageId: info.messageId };
-//   } catch (error) {
-//     console.error("❌ Email send failed:", error.message);
-//     return { success: false, error: error.message };
-//   }
-// };
-
-// export default transporter;
+export default activeTransporter;
