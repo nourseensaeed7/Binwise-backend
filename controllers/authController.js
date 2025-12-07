@@ -318,7 +318,8 @@ export const resetPassword = async (req, res) => {
 ===================================================== */
 export const isAuthenticated = async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select("-password");
+    // ✅ FIXED: Changed User to userModel
+    const user = await userModel.findById(req.userId).select("-password");
     
     if (!user) {
       return res.status(404).json({ 
@@ -330,8 +331,8 @@ export const isAuthenticated = async (req, res) => {
     res.json({
       success: true,
       userData: {
-        _id: user._id,          // ✅ MongoDB ID
-        id: user._id.toString(), // ✅ Also as string for compatibility
+        _id: user._id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         role: user.role,
@@ -347,18 +348,15 @@ export const isAuthenticated = async (req, res) => {
   }
 };
 
-// controllers/authController.js
-
-// ... (keep all your existing imports and functions)
-
 /* =====================================================
-   GET USER PROFILE - Fixed to include activities
+   GET USER PROFILE
 ===================================================== */
 export const getUserProfile = async (req, res) => {
   try {
     console.log("📋 Fetching profile for user:", req.userId);
     
-    const user = await User.findById(req.userId).select("-password");
+    // ✅ FIXED: Changed User to userModel
+    const user = await userModel.findById(req.userId).select("-password");
     
     if (!user) {
       console.log("❌ User not found");
@@ -374,8 +372,8 @@ export const getUserProfile = async (req, res) => {
     return res.json({
       success: true,
       user: {
-        _id: user._id,          // ✅ MongoDB ID
-        id: user._id.toString(), // ✅ Also as string
+        _id: user._id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         role: user.role,
@@ -388,7 +386,7 @@ export const getUserProfile = async (req, res) => {
         daysRecycled: user.daysRecycled || 0,
         badges: user.badges || [],
         stats: user.stats || {},
-        activity: user.activity || [], // ✅ CRITICAL
+        activity: user.activity || [],
         isAccountVerified: user.isAccountVerified,
         createdAt: user.createdAt,
       },
@@ -402,6 +400,7 @@ export const getUserProfile = async (req, res) => {
     });
   }
 };
+
 /* =====================================================
    UPDATE USER PROFILE
 ===================================================== */
@@ -417,14 +416,14 @@ export const updateProfile = async (req, res) => {
     if (phone) updateData.phone = phone;
     if (address) updateData.address = address;
 
-    // Handle profile image upload
     if (req.file) {
       const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
       updateData.profileImage = imageUrl;
       console.log("📸 New profile image:", imageUrl);
     }
 
-    const user = await User.findByIdAndUpdate(
+    // ✅ FIXED: Changed User to userModel
+    const user = await userModel.findByIdAndUpdate(
       userId,
       updateData,
       { new: true, runValidators: true }
@@ -464,6 +463,7 @@ export const updateProfile = async (req, res) => {
     });
   }
 };
+
 /* =====================================================
    ADD RECYCLING ACTIVITY
 ===================================================== */
@@ -508,7 +508,3 @@ export const addActivity = async (req, res) => {
       .json({ success: false, message: "Failed to add activity" });
   }
 };
-
-
-
-
