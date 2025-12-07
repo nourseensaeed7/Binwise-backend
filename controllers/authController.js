@@ -158,36 +158,71 @@ export const logout = async (req, res) => {
 };
 
 /* =====================================================
-   SEND EMAIL VERIFY OTP
+   SEND EMAIL VERIFY OTP - FIXED VERSION
 ===================================================== */
 export const sendVerifyOtp = async (req, res) => {
   try {
+    console.log("🔍 Starting OTP send process...");
+    console.log("   User ID:", req.userId);
+
+    // Find user
     const user = await userModel.findById(req.userId);
-    if (!user)
+    if (!user) {
+      console.log("❌ User not found");
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
+    }
+
+    console.log("✅ User found:", user.email);
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    console.log("🔢 OTP generated:", otp);
+
+    // Save OTP to database
     user.verifyOtp = otp;
     user.verifyOtpExpireAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
     await user.save();
+    console.log("💾 OTP saved to database");
 
-    console.log("📧 Sending verification OTP to:", user.email);
+    // Prepare email content
+    console.log("📧 Preparing email...");
+    
+    let emailHtml;
+    try {
+      emailHtml = prepareEmailTemplate(EMAIL_VERIFY_TEMPLATE, {
+        EMAIL: user.email,
+        OTP: otp
+      });
+      console.log("✅ Email template prepared");
+    } catch (templateError) {
+      console.error("❌ Template error:", templateError);
+      // Fallback to simple HTML if template fails
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #186933;">Email Verification</h2>
+          <p>Hello ${user.name || 'User'},</p>
+          <p>Your verification code is:</p>
+          <h1 style="color: #186933; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+          <p>This code will expire in 24 hours.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+          <hr style="border: 1px solid #eee; margin: 20px 0;">
+          <p style="color: #666; font-size: 12px;">BinWise - Your Recycling Companion</p>
+        </div>
+      `;
+      console.log("⚠️ Using fallback email template");
+    }
 
-    // ✅ Prepare email with placeholders replaced
-    const emailHtml = prepareEmailTemplate(EMAIL_VERIFY_TEMPLATE, {
-      EMAIL: user.email,
-      OTP: otp
-    });
-
-    // ✅ Send email using Gmail SMTP
+    // Send email
+    console.log("📤 Sending email to:", user.email);
     const result = await sendEmail({
       to: user.email,
-      subject: "Verify Your Email",
+      subject: "Verify Your Email - BinWise",
       html: emailHtml,
     });
+
+    console.log("📬 Email send result:", result);
 
     if (!result.success) {
       console.error("❌ Failed to send verification email:", result.error);
@@ -198,16 +233,19 @@ export const sendVerifyOtp = async (req, res) => {
       });
     }
 
-    console.log("✅ Verification OTP sent successfully");
+    console.log("✅ Verification OTP sent successfully via", result.provider);
     return res.json({
       success: true,
       message: "OTP sent to your email successfully",
     });
   } catch (error) {
-    console.error("❌ Verify OTP error:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Error sending OTP email" });
+    console.error("❌ Critical error in sendVerifyOtp:", error);
+    console.error("   Error stack:", error.stack);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Error sending OTP email",
+      error: error.message 
+    });
   }
 };
 
@@ -276,16 +314,34 @@ export const sendResetOtp = async (req, res) => {
 
     console.log("📧 Sending password reset OTP to:", email);
 
-    // ✅ Prepare email with placeholders replaced
-    const emailHtml = prepareEmailTemplate(PASSWORD_RESET_TEMPLATE, {
-      EMAIL: email,
-      OTP: otp
-    });
+    // Prepare email
+    let emailHtml;
+    try {
+      emailHtml = prepareEmailTemplate(PASSWORD_RESET_TEMPLATE, {
+        EMAIL: email,
+        OTP: otp
+      });
+    } catch (templateError) {
+      console.error("❌ Template error:", templateError);
+      // Fallback to simple HTML
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #186933;">Password Reset</h2>
+          <p>Hello,</p>
+          <p>Your password reset code is:</p>
+          <h1 style="color: #186933; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
+          <p>This code will expire in 15 minutes.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+          <hr style="border: 1px solid #eee; margin: 20px 0;">
+          <p style="color: #666; font-size: 12px;">BinWise - Your Recycling Companion</p>
+        </div>
+      `;
+    }
 
-    // ✅ Send email using Gmail SMTP
+    // Send email
     const result = await sendEmail({
       to: email,
-      subject: "Password Reset OTP",
+      subject: "Password Reset OTP - BinWise",
       html: emailHtml,
     });
 
