@@ -586,31 +586,32 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
     pickup.status = "assigned";
     await pickup.save();
 
-    // ✅ Populate all relationships
-    await pickup.populate("deliveryAgentId", "name email");
-    await pickup.populate("userId", "name email");
+    // ✅ FIX: Re-fetch the document with populated fields
+    const populatedPickup = await Pickup.findById(id)
+      .populate("deliveryAgentId", "name email")
+      .populate("userId", "name email");
 
     console.log("✅ Pickup assigned to agent:", deliveryAgentId);
-    console.log("   Agent name:", pickup.deliveryAgentId?.name);
+    console.log("   Agent name:", populatedPickup.deliveryAgentId?.name);
 
     // ✅ Emit socket events using req.io (NOT io directly)
     console.log("📡 Emitting assignment events...");
     
     emitSocketEvent(req, "pickup-assigned", {
-      pickup,
+      pickup: populatedPickup,
       userId: userId,
       agentId: deliveryAgentId,
       timestamp: new Date()
     });
 
     emitSocketEvent(req, "pickup-assigned-user", {
-      pickup,
-      message: `Agent ${pickup.deliveryAgentId?.name || 'assigned'} will handle your pickup`,
-      agentName: pickup.deliveryAgentId?.name
+      pickup: populatedPickup,
+      message: `Agent ${populatedPickup.deliveryAgentId?.name || 'assigned'} will handle your pickup`,
+      agentName: populatedPickup.deliveryAgentId?.name
     }, userId);
 
     emitSocketEvent(req, "pickup-assigned-agent", {
-      pickup,
+      pickup: populatedPickup,
       message: "You have been assigned a new pickup"
     }, deliveryAgentId);
 
@@ -618,7 +619,7 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
 
     res.json({ 
       success: true, 
-      pickup,
+      pickup: populatedPickup,
       message: "Pickup assigned successfully"
     });
   } catch (error) {
