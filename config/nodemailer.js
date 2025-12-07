@@ -1,138 +1,128 @@
 import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import dotenv from 'dotenv';
 dotenv.config();
 
 // ==========================================
-// Dual SMTP Configuration (Gmail + SendGrid)
+// SendGrid API Setup (Preferred for Vercel/Serverless)
 // ==========================================
-// Priority: Try Gmail first, fallback to SendGrid if Gmail fails
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+  console.log('✅ SendGrid API initialized');
+}
 
-const SMTP_PROVIDER = process.env.SMTP_PROVIDER || 'auto'; // 'gmail', 'sendgrid', or 'auto'
-
-// Gmail Configuration
+// ==========================================
+// Gmail SMTP Configuration (Fallback)
+// ==========================================
 const gmailConfig = {
   service: 'gmail',
   auth: {
     user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 15000,
 };
 
-// SendGrid Configuration
-const sendgridConfig = {
-  host: 'smtp.sendgrid.net',
-  port: 587,
-  secure: false,
-  auth: {
-    user: 'apikey', // SendGrid always uses 'apikey' as username
-    pass: process.env.SENDGRID_API_KEY,
-  },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
-};
-
-// Choose configuration based on SMTP_PROVIDER
-let primaryConfig, fallbackConfig, primaryName, fallbackName;
-
-if (SMTP_PROVIDER === 'sendgrid') {
-  primaryConfig = sendgridConfig;
-  fallbackConfig = gmailConfig;
-  primaryName = 'SendGrid';
-  fallbackName = 'Gmail';
-} else {
-  // Default: Gmail primary, SendGrid fallback
-  primaryConfig = gmailConfig;
-  fallbackConfig = sendgridConfig;
-  primaryName = 'Gmail';
-  fallbackName = 'SendGrid';
+let gmailTransporter = null;
+if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+  gmailTransporter = nodemailer.createTransport(gmailConfig);
+  console.log('✅ Gmail SMTP transporter created');
 }
 
-// Create transporters
-const primaryTransporter = nodemailer.createTransport(primaryConfig);
-const fallbackTransporter = nodemailer.createTransport(fallbackConfig);
+// Track which provider is working
+let activeProvider = 'sendgrid-api';
+let sendgridAvailable = !!SENDGRID_API_KEY;
+let gmailAvailable = !!gmailTransporter;
 
-// Track which transporter is working
-let activeTransporter = primaryTransporter;
-let activeProvider = primaryName;
-
-// Verify connections (non-blocking)
-const verifyTransporters = async () => {
-  try {
-    await primaryTransporter.verify();
-    console.log(`✅ ${primaryName} SMTP ready (PRIMARY)`);
-    activeTransporter = primaryTransporter;
-    activeProvider = primaryName;
-  } catch (error) {
-    console.warn(`⚠️  ${primaryName} SMTP failed:`, error.message);
-    console.log(`🔄 Trying ${fallbackName} as fallback...`);
-    
-    try {
-      await fallbackTransporter.verify();
-      console.log(`✅ ${fallbackName} SMTP ready (FALLBACK)`);
-      activeTransporter = fallbackTransporter;
-      activeProvider = fallbackName;
-    } catch (fallbackError) {
-      console.error(`❌ Both ${primaryName} and ${fallbackName} SMTP failed!`);
-      console.log("📧 Email functionality will be limited");
-      console.log("💡 Check your credentials:");
-      console.log("   - GMAIL_USER and GMAIL_APP_PASSWORD");
-      console.log("   - SENDGRID_API_KEY");
-    }
-  }
-};
-
-// Run verification
-verifyTransporters();
-
-// Helper function to send emails with automatic fallback
+// ==========================================
+// Send Email Function with Automatic Fallback
+// ==========================================
 export const sendEmail = async (mailOptions) => {
   const senderEmail = process.env.SENDER_EMAIL || process.env.GMAIL_USER;
   const appName = process.env.APP_NAME || 'BinWise';
 
-  try {
-    // Try primary transporter first
-    const info = await activeTransporter.sendMail({
-      from: `"${appName}" <${senderEmail}>`,
-      ...mailOptions,
-    });
-    
-    console.log(`📧 Email sent via ${activeProvider}:`, info.messageId);
-    console.log("   To:", mailOptions.to);
-    console.log("   Subject:", mailOptions.subject);
-    
-    return { success: true, messageId: info.messageId, provider: activeProvider };
-  } catch (error) {
-    console.error(`❌ ${activeProvider} failed:`, error.message);
-    
-    // Try fallback transporter
-    if (activeTransporter === primaryTransporter) {
-      console.log(`🔄 Retrying with ${fallbackName}...`);
+  console.log('📧 Starting email send...');
+  console.log('   To:', mailOptions.to);
+  console.log('   Subject:', mailOptions.subject);
+
+  // ==========================================
+  // Method 1: Try SendGrid API First (Best for Vercel)
+  // ==========================================
+  if (sendgridAvailable) {
+    try {
+      console.log('🚀 Trying SendGrid API...');
       
-      try {
-        const fallbackInfo = await fallbackTransporter.sendMail({
-          from: `"${appName}" <${senderEmail}>`,
-          ...mailOptions,
-        });
-        
-        console.log(`✅ Email sent via ${fallbackName} (fallback):`, fallbackInfo.messageId);
-        
-        // Switch to fallback for future emails
-        activeTransporter = fallbackTransporter;
-        activeProvider = fallbackName;
-        
-        return { success: true, messageId: fallbackInfo.messageId, provider: fallbackName };
-      } catch (fallbackError) {
-        console.error(`❌ ${fallbackName} also failed:`, fallbackError.message);
-        return { success: false, error: `Both providers failed: ${error.message}` };
+      const msg = {
+        to: mailOptions.to,
+        from: {
+          email: senderEmail,
+          name: appName
+        },
+        subject: mailOptions.subject,
+        html: mailOptions.html,
+      };
+
+      const result = await sgMail.send(msg);
+      
+      console.log('✅ Email sent successfully via SendGrid API');
+      console.log('   Message ID:', result[0]?.headers?.['x-message-id']);
+      
+      return { 
+        success: true, 
+        messageId: result[0]?.headers?.['x-message-id'],
+        provider: 'SendGrid API' 
+      };
+    } catch (error) {
+      console.error('❌ SendGrid API failed:', error.message);
+      
+      // Log detailed error for debugging
+      if (error.response) {
+        console.error('   Status:', error.response.status);
+        console.error('   Body:', error.response.body);
       }
+      
+      // If SendGrid fails, try Gmail as fallback
+      console.log('🔄 Falling back to Gmail SMTP...');
     }
-    
-    return { success: false, error: error.message };
   }
+
+  // ==========================================
+  // Method 2: Try Gmail SMTP as Fallback
+  // ==========================================
+  if (gmailAvailable) {
+    try {
+      console.log('📤 Trying Gmail SMTP...');
+      
+      const info = await gmailTransporter.sendMail({
+        from: `"${appName}" <${senderEmail}>`,
+        ...mailOptions,
+      });
+      
+      console.log('✅ Email sent via Gmail SMTP (fallback)');
+      console.log('   Message ID:', info.messageId);
+      
+      activeProvider = 'gmail-smtp';
+      return { 
+        success: true, 
+        messageId: info.messageId, 
+        provider: 'Gmail SMTP' 
+      };
+    } catch (error) {
+      console.error('❌ Gmail SMTP also failed:', error.message);
+    }
+  }
+
+  // ==========================================
+  // Both Methods Failed
+  // ==========================================
+  console.error('❌ All email providers failed');
+  return { 
+    success: false, 
+    error: 'All email providers failed. Please check your configuration.' 
+  };
 };
 
 // Helper to replace placeholders in email templates
@@ -145,4 +135,22 @@ export const prepareEmailTemplate = (template, replacements) => {
   return result;
 };
 
-export default activeTransporter;
+// Verify configuration on startup
+const verifyConfiguration = () => {
+  console.log('\n🔧 Email Configuration Check:');
+  console.log('   SendGrid API Key:', SENDGRID_API_KEY ? '✅ Set' : '❌ Missing');
+  console.log('   Gmail User:', process.env.GMAIL_USER ? '✅ Set' : '❌ Missing');
+  console.log('   Gmail App Password:', process.env.GMAIL_APP_PASSWORD ? '✅ Set' : '❌ Missing');
+  console.log('   Sender Email:', senderEmail ? '✅ Set' : '❌ Missing');
+  
+  if (!SENDGRID_API_KEY && !gmailTransporter) {
+    console.error('\n⚠️  WARNING: No email providers configured!');
+    console.error('   Please set either SendGrid API key or Gmail credentials.\n');
+  } else {
+    console.log('\n✅ Email system ready\n');
+  }
+};
+
+verifyConfiguration();
+
+export default { sendEmail, prepareEmailTemplate };
