@@ -49,7 +49,7 @@ const userSchema = new mongoose.Schema(
     // 🧭 Profile fields
     profileImage: {
       type: String,
-      default: "",
+      default: null,
     },
     address: {
       type: String,
