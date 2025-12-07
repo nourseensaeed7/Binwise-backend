@@ -562,7 +562,7 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
   try {
     const { id } = req.params;
     console.log("🚚 Assigning pickup:", id);
-    console.log("   req.io available?", typeof req.io !== 'undefined');
+    console.log("   Delivery Agent ID received:", req.body.deliveryAgentId);
     
     const { deliveryAgentId, pickupTime } = req.body;
 
@@ -570,6 +570,18 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
       return res.status(400).json({ 
         success: false, 
         message: "Delivery agent ID is required" 
+      });
+    }
+
+    // ✅ VERIFY THE AGENT EXISTS
+    const agent = await userModel.findById(deliveryAgentId);
+    console.log("   Agent found?", !!agent);
+    console.log("   Agent details:", agent ? { name: agent.name, email: agent.email, role: agent.role } : "NOT FOUND");
+    
+    if (!agent) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Delivery agent not found" 
       });
     }
 
@@ -584,38 +596,18 @@ router.put("/:id/assign", authMiddleware, roleAuth("admin"), async (req, res) =>
     pickup.deliveryAgentId = deliveryAgentId;
     pickup.pickupTime = pickupTime ? new Date(pickupTime) : new Date();
     pickup.status = "assigned";
+    
+    console.log("   Saving pickup with deliveryAgentId:", pickup.deliveryAgentId);
     await pickup.save();
+    console.log("   Pickup saved successfully");
 
     // ✅ FIX: Re-fetch the document with populated fields
     const populatedPickup = await Pickup.findById(id)
       .populate("deliveryAgentId", "name email")
       .populate("userId", "name email");
 
-    console.log("✅ Pickup assigned to agent:", deliveryAgentId);
+    console.log("   After populate - deliveryAgentId:", populatedPickup.deliveryAgentId);
     console.log("   Agent name:", populatedPickup.deliveryAgentId?.name);
-
-    // ✅ Emit socket events using req.io (NOT io directly)
-    console.log("📡 Emitting assignment events...");
-    
-    emitSocketEvent(req, "pickup-assigned", {
-      pickup: populatedPickup,
-      userId: userId,
-      agentId: deliveryAgentId,
-      timestamp: new Date()
-    });
-
-    emitSocketEvent(req, "pickup-assigned-user", {
-      pickup: populatedPickup,
-      message: `Agent ${populatedPickup.deliveryAgentId?.name || 'assigned'} will handle your pickup`,
-      agentName: populatedPickup.deliveryAgentId?.name
-    }, userId);
-
-    emitSocketEvent(req, "pickup-assigned-agent", {
-      pickup: populatedPickup,
-      message: "You have been assigned a new pickup"
-    }, deliveryAgentId);
-
-    console.log("✅ Assignment events emitted successfully");
 
     res.json({ 
       success: true, 
