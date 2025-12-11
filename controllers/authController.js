@@ -12,8 +12,9 @@ import {
 ===================================================== */
 export const register = async (req, res) => {
   try {
-    let { name, email, password, role } = req.body;
-    if (!name || !email || !password) {
+    let { name, email, phone, password, role } = req.body;
+    
+    if (!name || !email || !phone || !password) {
       return res
         .status(400)
         .json({ success: false, message: "All fields are required" });
@@ -33,6 +34,7 @@ export const register = async (req, res) => {
     const user = new userModel({
       name,
       email,
+      phone,
       password: hashedPassword,
       role: role || "user",
       isAccountVerified: role === "admin" ? true : false,
@@ -62,6 +64,7 @@ export const register = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         level: user.level,
         badges: user.badges,
@@ -122,6 +125,7 @@ export const login = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         level: user.level,
         badges: user.badges,
@@ -158,14 +162,13 @@ export const logout = async (req, res) => {
 };
 
 /* =====================================================
-   SEND EMAIL VERIFY OTP - FIXED VERSION
+   SEND EMAIL VERIFY OTP
 ===================================================== */
 export const sendVerifyOtp = async (req, res) => {
   try {
     console.log("🔍 Starting OTP send process...");
     console.log("   User ID:", req.userId);
 
-    // Find user
     const user = await userModel.findById(req.userId);
     if (!user) {
       console.log("❌ User not found");
@@ -176,17 +179,14 @@ export const sendVerifyOtp = async (req, res) => {
 
     console.log("✅ User found:", user.email);
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     console.log("🔢 OTP generated:", otp);
 
-    // Save OTP to database
     user.verifyOtp = otp;
-    user.verifyOtpExpireAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    user.verifyOtpExpireAt = Date.now() + 24 * 60 * 60 * 1000;
     await user.save();
     console.log("💾 OTP saved to database");
 
-    // Prepare email content
     console.log("📧 Preparing email...");
     
     let emailHtml;
@@ -198,7 +198,6 @@ export const sendVerifyOtp = async (req, res) => {
       console.log("✅ Email template prepared");
     } catch (templateError) {
       console.error("❌ Template error:", templateError);
-      // Fallback to simple HTML if template fails
       emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #186933;">Email Verification</h2>
@@ -214,7 +213,6 @@ export const sendVerifyOtp = async (req, res) => {
       console.log("⚠️ Using fallback email template");
     }
 
-    // Send email
     console.log("📤 Sending email to:", user.email);
     const result = await sendEmail({
       to: user.email,
@@ -306,15 +304,13 @@ export const sendResetOtp = async (req, res) => {
     if (!user)
       return res.status(404).json({ success: false, message: "User not found" });
 
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.resetOtp = otp;
-    user.resetOtpExpireAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+    user.resetOtpExpireAt = Date.now() + 15 * 60 * 1000;
     await user.save();
 
     console.log("📧 Sending password reset OTP to:", email);
 
-    // Prepare email
     let emailHtml;
     try {
       emailHtml = prepareEmailTemplate(PASSWORD_RESET_TEMPLATE, {
@@ -323,7 +319,6 @@ export const sendResetOtp = async (req, res) => {
       });
     } catch (templateError) {
       console.error("❌ Template error:", templateError);
-      // Fallback to simple HTML
       emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #186933;">Password Reset</h2>
@@ -338,7 +333,6 @@ export const sendResetOtp = async (req, res) => {
       `;
     }
 
-    // Send email
     const result = await sendEmail({
       to: email,
       subject: "Password Reset OTP - BinWise",
@@ -427,6 +421,7 @@ export const isAuthenticated = async (req, res) => {
         id: user._id.toString(),
         name: user.name,
         email: user.email,
+        phone: user.phone,
         role: user.role,
         isAccountVerified: user.isAccountVerified,
         points: user.points || 0,
@@ -467,8 +462,8 @@ export const getUserProfile = async (req, res) => {
         id: user._id.toString(),
         name: user.name,
         email: user.email,
-        role: user.role,
         phone: user.phone,
+        role: user.role,
         address: user.address,
         profileImage: user.profileImage,
         points: user.points || 0,
@@ -535,8 +530,8 @@ export const updateProfile = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        role: user.role,
         phone: user.phone,
+        role: user.role,
         address: user.address,
         profileImage: user.profileImage,
         points: user.points,

@@ -103,7 +103,7 @@ router.get("/test-socket", authMiddleware, async (req, res) => {
 router.get("/", authMiddleware, roleAuth("admin"), async (req, res) => {
   try {
     const pickups = await Pickup.find()
-      .populate("userId", "name email")
+      .populate("userId", "name email phone")
       .populate("deliveryAgentId", "name email")
       .sort({ createdAt: -1 });
     res.json({ success: true, pickups });

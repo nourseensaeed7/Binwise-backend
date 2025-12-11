@@ -1,4 +1,5 @@
 import userModel from "../models/userModel.js";
+
 export const getUserData = async (req, res) => {
   try {
     const user = await userModel.findById(req.userId).select("-password");
@@ -11,7 +12,8 @@ export const getUserData = async (req, res) => {
       userData: {
         name: user.name,
         email: user.email,
-        role: user.role, // 👈 include role here
+        phone: user.phone,
+        role: user.role,
         isAccountVerified: user.isAccountVerified,
       },
     });
@@ -19,4 +21,3 @@ export const getUserData = async (req, res) => {
     res.json({ success: false, message: error.message });
   }
 };
-

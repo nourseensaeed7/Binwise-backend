@@ -137,10 +137,11 @@ router.get("/profile", authMiddleware, async (req, res) => {
 ===================================================== */
 router.put("/update-profile", authMiddleware, upload.single("profileImage"), async (req, res) => {
   try {
-    const { name, email, address } = req.body;
+    const { name, email, phone, address } = req.body;
     const userId = req.userId;
 
     console.log("📝 Updating profile for user:", userId);
+    console.log("   Phone:", phone);
     console.log("   Address:", address);
     console.log("   File uploaded:", !!req.file);
     if (req.file) {
@@ -150,6 +151,11 @@ router.put("/update-profile", authMiddleware, upload.single("profileImage"), asy
     const user = await userModel.findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Update phone if provided
+    if (phone !== undefined) {
+      user.phone = phone;
     }
 
     // Update address if provided
@@ -185,6 +191,7 @@ router.put("/update-profile", authMiddleware, upload.single("profileImage"), asy
         _id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         address: user.address,
         profileImage: user.profileImage,
         level: user.level,

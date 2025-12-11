@@ -1,4 +1,3 @@
-
 import mongoose from "mongoose";
 
 const activitySchema = new mongoose.Schema(
@@ -24,6 +23,11 @@ const userSchema = new mongoose.Schema(
       unique: true,
       lowercase: true,
     },
+    phone: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     password: {
       type: String,
       required: true,
@@ -34,7 +38,7 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
-    // 📧 Email verification
+    // 🔧 Email verification
     isAccountVerified: {
       type: Boolean,
       default: false,
@@ -42,7 +46,7 @@ const userSchema = new mongoose.Schema(
     verifyOtp: String,
     verifyOtpExpireAt: Number,
 
-    // 🔑 Password reset
+    // 🔒 Password reset
     resetOtp: String,
     resetOtpExpireAt: Number,
 
@@ -113,5 +117,3 @@ userSchema.methods.toJSON = function () {
 const User = mongoose.model("User", userSchema);
 
 export default User;
-
-
